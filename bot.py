@@ -65,9 +65,12 @@ def _lookup_emoji_id(ch):
     if eid:
         return eid
     n = _norm_emoji(ch)
-    for k, v in EMOJI_MAP.items():
+    variants = {ch, n, n + "️", (ch or "") + "️"}
+    for k, v in list(EMOJI_MAP.items()):
         eid = _valid_emoji_id(v)
-        if eid and (k == ch or _norm_emoji(k) == n):
+        if not eid:
+            continue
+        if k in variants or _norm_emoji(k) in variants or _norm_emoji(k) == n:
             return eid
     return None
 
@@ -144,15 +147,23 @@ class InlineKeyboardButton(_IKB_orig):
         if style:
             d["style"] = style
         eid = self._resolve_emoji_id()
-        if eid and "text" in d:
-            original = d["text"]
-            d["icon_custom_emoji_id"] = eid
-            stripped = _strip_leading_emoji_text(original, self._emoji_char)
-            if stripped == original and self._emoji_char:
-                stripped = _strip_emoji_once(original, self._emoji_char)
-            if stripped != original:
-                _STRIPPED_TEXT_MAP[stripped] = original
-                d["text"] = stripped or original
+        if eid:
+            d["icon_custom_emoji_id"] = str(eid)
+            if "text" in d:
+                original = d["text"]
+                stripped = _strip_leading_emoji_text(original, self._emoji_char)
+                if stripped == original and self._emoji_char:
+                    stripped = _strip_emoji_once(original, self._emoji_char)
+                # also try map keys that share this eid
+                if stripped == original:
+                    for k, v in EMOJI_MAP.items():
+                        if str(v) == str(eid):
+                            stripped = _strip_emoji_once(original, k)
+                            if stripped != original:
+                                break
+                if stripped != original:
+                    _STRIPPED_TEXT_MAP[stripped] = original
+                    d["text"] = stripped or original
         return d
 
 class KeyboardButton(_KB_orig):
@@ -174,15 +185,23 @@ class KeyboardButton(_KB_orig):
         if style:
             d["style"] = style
         eid = self._resolve_emoji_id()
-        if eid and "text" in d:
-            original = d["text"]
-            d["icon_custom_emoji_id"] = eid
-            stripped = _strip_leading_emoji_text(original, self._emoji_char)
-            if stripped == original and self._emoji_char:
-                stripped = _strip_emoji_once(original, self._emoji_char)
-            if stripped != original:
-                _STRIPPED_TEXT_MAP[stripped] = original
-                d["text"] = stripped or original
+        if eid:
+            d["icon_custom_emoji_id"] = str(eid)
+            if "text" in d:
+                original = d["text"]
+                stripped = _strip_leading_emoji_text(original, self._emoji_char)
+                if stripped == original and self._emoji_char:
+                    stripped = _strip_emoji_once(original, self._emoji_char)
+                # also try map keys that share this eid
+                if stripped == original:
+                    for k, v in EMOJI_MAP.items():
+                        if str(v) == str(eid):
+                            stripped = _strip_emoji_once(original, k)
+                            if stripped != original:
+                                break
+                if stripped != original:
+                    _STRIPPED_TEXT_MAP[stripped] = original
+                    d["text"] = stripped or original
         return d
 
 types.InlineKeyboardButton = InlineKeyboardButton
@@ -213,7 +232,48 @@ KH_TZ = timezone(timedelta(hours=7))
 if not BOT_TOKEN:
     raise SystemExit("Set BOT_TOKEN")
 
+
 bot = telebot.TeleBot(BOT_TOKEN, parse_mode="HTML")
+
+def api_send_message(chat_id, text, entities=None, reply_markup=None, parse_mode=None):
+    """Direct Bot API send — ensures custom_emoji entities + icon keyboard work."""
+    import json as _json
+    url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
+    body = {"chat_id": chat_id, "text": text}
+    if parse_mode:
+        body["parse_mode"] = parse_mode
+    if entities:
+        ser = []
+        for e in entities:
+            if hasattr(e, "to_dict"):
+                d = e.to_dict()
+            elif isinstance(e, dict):
+                d = e
+            else:
+                d = {
+                    "type": getattr(e, "type", None),
+                    "offset": getattr(e, "offset", 0),
+                    "length": getattr(e, "length", 0),
+                }
+                cid = getattr(e, "custom_emoji_id", None)
+                if cid:
+                    d["custom_emoji_id"] = str(cid)
+            # force custom_emoji_id if missing from to_dict
+            if getattr(e, "type", None) == "custom_emoji" or d.get("type") == "custom_emoji":
+                cid = d.get("custom_emoji_id") or getattr(e, "custom_emoji_id", None)
+                if cid:
+                    d["custom_emoji_id"] = str(cid)
+            ser.append(d)
+        body["entities"] = _json.dumps(ser)
+    if reply_markup is not None:
+        rm = reply_markup.to_dict() if hasattr(reply_markup, "to_dict") else reply_markup
+        body["reply_markup"] = _json.dumps(rm)
+    r = requests.post(url, data=body, timeout=30)
+    try:
+        return r.json()
+    except Exception:
+        return {"ok": False, "description": r.text[:300]}
+
 _lock = threading.RLock()
 # admin wizard state: uid -> {action, ...}
 _wait: dict[int, dict] = {}
@@ -483,6 +543,7 @@ def check_payment(transaction_id: str):
 
 # ─── Keyboards ────────────────────────────────────────────────────────────
 def kb_main():
+    load_emoji()
     m = types.ReplyKeyboardMarkup(resize_keyboard=True)
     m.row(types.KeyboardButton("🛒 BUY NOW"))
     m.row(types.KeyboardButton("📦 ការបញ្ជាទិញរបស់ខ្ញុំ"), types.KeyboardButton("💬 Support"))
@@ -852,7 +913,7 @@ def cmd_start(msg):
         except Exception:
             pass
     bot.send_message(msg.chat.id, text, reply_markup=kb_buy_inline())
-    bot.send_message(msg.chat.id, "ជ្រើសមុខងារ៖", reply_markup=kb_main())
+    api_send_message(msg.chat.id, "ជ្រើសមុខងារ៖", reply_markup=kb_main(), parse_mode="HTML")
 
 
 @bot.message_handler(commands=["admin", "panel"])
@@ -1203,19 +1264,18 @@ def handle_admin_cb(c: types.CallbackQuery):
         body = "".join(parts)
         prefix_u16 = len(prefix.encode("utf-16-le")) // 2
         try:
-            bot.send_message(
-                chat_id,
-                prefix + body,
-                entities=[
-                    _MessageEntity(
-                        type="custom_emoji",
-                        offset=e.offset + prefix_u16,
-                        length=e.length,
-                        custom_emoji_id=e.custom_emoji_id,
-                    )
-                    for e in entities
-                ],
-            )
+            ents = [
+                _MessageEntity(
+                    type="custom_emoji",
+                    offset=e.offset + prefix_u16,
+                    length=e.length,
+                    custom_emoji_id=str(e.custom_emoji_id),
+                )
+                for e in entities
+            ]
+            res = api_send_message(chat_id, prefix + body, entities=ents)
+            if not res.get("ok"):
+                bot.send_message(chat_id, f"preview API: <code>{esc(res)}</code>")
         except Exception as ex:
             lines = "\n".join(
                 f"{ch} <code>{EMOJI_MAP.get(ch)}</code>"
@@ -1539,16 +1599,17 @@ def on_wizard(msg):
             bot.reply_to(msg, "id មិនត្រឹមត្រូវ")
             return
         EMOJI_MAP[key] = cid
+        EMOJI_MAP[_norm_emoji(key)] = cid
+        EMOJI_MAP[_norm_emoji(key) + "\ufe0f"] = cid
         save_emoji()
         load_emoji()
-        bot.reply_to(msg, f"✅ {key} → <code>{esc(cid)}</code>")
+        bot.reply_to(msg, f"✅ {key} → <code>{esc(cid)}</code>\nផ្ញើ /start ដើម្បី refresh keyboard")
         # preview single
         try:
-            bot.send_message(
-                msg.chat.id,
-                key,
-                entities=[_MessageEntity(type="custom_emoji", offset=0, length=len(key.encode("utf-16-le"))//2, custom_emoji_id=cid)],
-            )
+            ent = _MessageEntity(type="custom_emoji", offset=0, length=len(key.encode("utf-16-le")) // 2, custom_emoji_id=str(cid))
+            res = api_send_message(msg.chat.id, key, entities=[ent])
+            if not res.get("ok"):
+                bot.send_message(msg.chat.id, f"preview API: <code>{esc(res)}</code>")
         except Exception as ex:
             bot.send_message(msg.chat.id, f"preview err: {esc(ex)}")
         bot.send_message(msg.chat.id, "✨ Emoji Premium", reply_markup=kb_emoji_menu())
