@@ -408,12 +408,32 @@ def load_settings():
             "support_text": "💬 Support — ទាក់ទង admin",
             "force_channel": "",
             "maintenance": False,
+            "khmer_api_url": "",
+            "khmer_api_key": "",
+            "khmer_profile_key": "",
         },
     )
 
 
 def save_settings(s):
     _write(SETTINGS_FILE, s)
+
+
+def get_payment_cfg():
+    st = load_settings()
+    url = (st.get("khmer_api_url") or KHMER_API_URL or "https://khmer-system.com").rstrip("/")
+    api_key = (st.get("khmer_api_key") or KHMER_API_KEY or "").strip()
+    profile_key = (st.get("khmer_profile_key") or KHMER_PROFILE_KEY or "").strip()
+    return {"url": url, "api_key": api_key, "profile_key": profile_key}
+
+
+def mask_key(k: str) -> str:
+    k = (k or "").strip()
+    if not k:
+        return "—"
+    if len(k) <= 10:
+        return k[:2] + "***"
+    return k[:6] + "…" + k[-4:]
 
 
 def is_admin(uid: int) -> bool:
@@ -514,24 +534,28 @@ def slugify(name: str) -> str:
 
 # ─── Payment ──────────────────────────────────────────────────────────────
 def create_qr(amount: float, order_id: str, remark: str = ""):
-    if not KHMER_API_KEY and not KHMER_PROFILE_KEY:
+    cfg = get_payment_cfg()
+    KHMER_API_URL_ = cfg["url"]
+    KHMER_API_KEY_ = cfg["api_key"]
+    KHMER_PROFILE_KEY_ = cfg["profile_key"]
+    if not KHMER_API_KEY_ and not KHMER_PROFILE_KEY_:
         return {"ok": False, "error": "payment_not_configured"}
     headers = {"Content-Type": "application/json", "Accept": "application/json"}
     payloads = [
         {
-            "url": f"{KHMER_API_URL}/api/qr/create",
+            "url": f"{KHMER_API_URL_}/api/qr/create",
             "json": {
-                "api_key": KHMER_API_KEY or KHMER_PROFILE_KEY,
-                "profile_key": KHMER_PROFILE_KEY or KHMER_API_KEY,
+                "api_key": KHMER_API_KEY_ or KHMER_PROFILE_KEY_,
+                "profile_key": KHMER_PROFILE_KEY_ or KHMER_API_KEY_,
                 "amount": float(amount),
                 "order_id": order_id,
                 "remark": remark or order_id,
             },
         },
         {
-            "url": f"{KHMER_API_URL}/api/v1/qr",
+            "url": f"{KHMER_API_URL_}/api/v1/qr",
             "json": {
-                "key": KHMER_API_KEY or KHMER_PROFILE_KEY,
+                "key": KHMER_API_KEY_ or KHMER_PROFILE_KEY_,
                 "amount": float(amount),
                 "reference": order_id,
                 "description": remark or order_id,
@@ -561,12 +585,16 @@ def create_qr(amount: float, order_id: str, remark: str = ""):
 
 
 def check_payment(transaction_id: str):
+    cfg = get_payment_cfg()
+    KHMER_API_URL_ = cfg["url"]
+    KHMER_API_KEY_ = cfg["api_key"]
+    KHMER_PROFILE_KEY_ = cfg["profile_key"]
     if not transaction_id:
         return {"paid": False}
     headers = {"Content-Type": "application/json"}
     urls = [
-        (f"{KHMER_API_URL}/api/qr/status", {"api_key": KHMER_API_KEY or KHMER_PROFILE_KEY, "transaction_id": transaction_id}),
-        (f"{KHMER_API_URL}/api/v1/qr/check", {"key": KHMER_API_KEY or KHMER_PROFILE_KEY, "transaction_id": transaction_id}),
+        (f"{KHMER_API_URL_}/api/qr/status", {"api_key": KHMER_API_KEY_ or KHMER_PROFILE_KEY_, "transaction_id": transaction_id}),
+        (f"{KHMER_API_URL_}/api/v1/qr/check", {"key": KHMER_API_KEY_ or KHMER_PROFILE_KEY_, "transaction_id": transaction_id}),
     ]
     for url, body in urls:
         try:
@@ -1578,20 +1606,27 @@ def handle_admin_cb(c: types.CallbackQuery):
                 callback_data="ad:togmaint",
             )
         )
+        m.add(types.InlineKeyboardButton("🔑 API Key (Khmer-system)", callback_data="ad:set_api_key", color="active"))
+        m.add(types.InlineKeyboardButton("👤 Profile Key", callback_data="ad:set_profile_key", color="progress"))
+        m.add(types.InlineKeyboardButton("🌐 API URL", callback_data="ad:set_api_url", color="progress"))
         m.add(types.InlineKeyboardButton("✏️ Welcome text", callback_data="ad:setwelcome", color="progress"))
         m.add(types.InlineKeyboardButton("🖼 Upload Banner", callback_data="ad:setbanner", color="active"))
         m.add(types.InlineKeyboardButton("🎬 Welcome Video", callback_data="ad:setwelcomevid", color="active"))
         m.add(types.InlineKeyboardButton("🎥 Tutorial Video", callback_data="ad:settutorial", color="active"))
         m.add(types.InlineKeyboardButton("✏️ Support text", callback_data="ad:setsupport", color="progress"))
         m.add(types.InlineKeyboardButton("⬅️ Admin", callback_data="ad:home", color="inactive"))
-        pay_ok = "✅" if (KHMER_API_KEY or KHMER_PROFILE_KEY) else "❌"
+        cfg = get_payment_cfg()
+        pay_ok = "✅" if (cfg["api_key"] or cfg["profile_key"]) else "❌"
         edit(
-            f"⚙️ <b>Settings</b>\n\n"
-            f"Bot: {esc(BOT_NAME)}\n"
-            f"Payment keys: {pay_ok}\n"
-            f"Channel: <code>{esc(CHANNEL_ID) or '—'}</code>\n"
-            f"Admins: {len(ADMIN_IDS)}\n"
-            f"Maintenance: <b>{'ON' if st.get('maintenance') else 'OFF'}</b>",
+            "⚙️ <b>Settings</b>\n\n"
+            "Bot: " + esc(BOT_NAME) + "\n"
+            "Payment: " + pay_ok + "\n"
+            "API URL: <code>" + esc(cfg["url"]) + "</code>\n"
+            "API Key: <code>" + esc(mask_key(cfg["api_key"])) + "</code>\n"
+            "Profile Key: <code>" + esc(mask_key(cfg["profile_key"])) + "</code>\n"
+            "Channel: <code>" + esc(CHANNEL_ID or "—") + "</code>\n"
+            "Admins: " + str(len(ADMIN_IDS)) + "\n"
+            "Maintenance: <b>" + ("ON" if st.get("maintenance") else "OFF") + "</b>",
             m,
         )
         return
@@ -1604,6 +1639,39 @@ def handle_admin_cb(c: types.CallbackQuery):
         # refresh
         c.data = "ad:settings"
         handle_admin_cb(c)
+        return
+
+    if data == "ad:set_api_key":
+        bot.answer_callback_query(c.id)
+        _wait[uid] = {"action": "set_khmer_api_key"}
+        edit(
+            "🔑 <b>Khmer-system API Key</b>\n\nផ្ញើ API Key\nលុប: <code>/clear</code>\n/cancel",
+            types.InlineKeyboardMarkup().add(
+                types.InlineKeyboardButton("⬅️", callback_data="ad:settings", color="inactive")
+            ),
+        )
+        return
+
+    if data == "ad:set_profile_key":
+        bot.answer_callback_query(c.id)
+        _wait[uid] = {"action": "set_khmer_profile_key"}
+        edit(
+            "👤 <b>Profile Key</b>\n\nផ្ញើ Profile Key\nលុប: <code>/clear</code>\n/cancel",
+            types.InlineKeyboardMarkup().add(
+                types.InlineKeyboardButton("⬅️", callback_data="ad:settings", color="inactive")
+            ),
+        )
+        return
+
+    if data == "ad:set_api_url":
+        bot.answer_callback_query(c.id)
+        _wait[uid] = {"action": "set_khmer_api_url"}
+        edit(
+            "🌐 <b>API URL</b>\n\nឧ. <code>https://khmer-system.com</code>\n/cancel",
+            types.InlineKeyboardMarkup().add(
+                types.InlineKeyboardButton("⬅️", callback_data="ad:settings", color="inactive")
+            ),
+        )
         return
 
     if data == "ad:setsupport":
@@ -2021,6 +2089,46 @@ def on_wizard(msg):
         store["tutorial_video"] = msg.video.file_id
         save_store(store)
         bot.reply_to(msg, "✅ Tutorial video រួច")
+        return
+
+    if action == "set_khmer_api_key":
+        _wait.pop(uid, None)
+        st = load_settings()
+        val = (msg.text or "").strip()
+        if val.lower() in ("/clear", "clear", "-"):
+            st["khmer_api_key"] = ""
+            save_settings(st)
+            bot.reply_to(msg, "✅ លុប API Key")
+        else:
+            st["khmer_api_key"] = val
+            save_settings(st)
+            bot.reply_to(msg, "✅ API Key · <code>" + esc(mask_key(val)) + "</code>")
+        return
+
+    if action == "set_khmer_profile_key":
+        _wait.pop(uid, None)
+        st = load_settings()
+        val = (msg.text or "").strip()
+        if val.lower() in ("/clear", "clear", "-"):
+            st["khmer_profile_key"] = ""
+            save_settings(st)
+            bot.reply_to(msg, "✅ លុប Profile Key")
+        else:
+            st["khmer_profile_key"] = val
+            save_settings(st)
+            bot.reply_to(msg, "✅ Profile Key · <code>" + esc(mask_key(val)) + "</code>")
+        return
+
+    if action == "set_khmer_api_url":
+        _wait.pop(uid, None)
+        st = load_settings()
+        val = (msg.text or "").strip().rstrip("/")
+        if not val.startswith("http"):
+            bot.reply_to(msg, "URL ត្រូវចាប់ផ្តើម http")
+            return
+        st["khmer_api_url"] = val
+        save_settings(st)
+        bot.reply_to(msg, "✅ API URL · <code>" + esc(val) + "</code>")
         return
 
     if action == "set_support":
