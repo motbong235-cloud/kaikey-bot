@@ -429,7 +429,48 @@ def esc(s):
 
 
 def pe(key: str, fallback: str = "") -> str:
-    return fallback or ""
+    """Return unicode glyph for display; premium is applied via button icon_custom_emoji_id / entities."""
+    load_emoji()
+    ch = key or fallback or ""
+    if not ch:
+        return fallback or ""
+    # if key is already a known mapped char, keep it
+    if _lookup_emoji_id(ch) or ch in EMOJI_MAP:
+        return ch
+    return fallback or ch
+
+
+def product_btn_label(icon: str, name: str, extra: str = "") -> str:
+    """Label with leading icon so premium emoji can attach on keyboard buttons."""
+    load_emoji()
+    ic = (icon or "📦").strip() or "📦"
+    # take first grapheme-ish
+    if len(ic) > 8:
+        ic = ic[:4]
+    base = f"{ic} {name}".strip()
+    if extra:
+        return f"{base} {extra}".strip()
+    return base
+
+
+def extract_premium_from_msg(msg):
+    """Return (unicode_char, custom_emoji_id or None) from message."""
+    cid = None
+    for ent in (msg.entities or []) or []:
+        if ent.type == "custom_emoji" and getattr(ent, "custom_emoji_id", None):
+            cid = str(ent.custom_emoji_id)
+            break
+    text = (msg.text or msg.caption or "").strip()
+    ch = ""
+    if text:
+        # first non-space char/cluster
+        ch = text.split()[0] if text.split() else text[:2]
+        # prefer single emoji from map
+        for k in _EMOJI_CHARS_SORTED:
+            if text.startswith(k):
+                ch = k
+                break
+    return ch, cid
 
 
 def pack_stock_count(pack) -> int:
@@ -558,28 +599,34 @@ def kb_buy_inline():
 
 
 def kb_categories(store):
+    load_emoji()
     m = types.InlineKeyboardMarkup()
     m.add(types.InlineKeyboardButton("🛒 Categories all 🔀", callback_data="cats", color="progress"))
     for c in store.get("categories") or []:
         if not c.get("enabled", True):
             continue
         icon = c.get("icon") or "📦"
-        m.add(types.InlineKeyboardButton(f"{icon} {c.get('name')}", callback_data=f"cat:{c['id']}", color="active"))
+        label = product_btn_label(icon, c.get("name") or "")
+        m.add(types.InlineKeyboardButton(label, callback_data=f"cat:{c['id']}", color="active"))
     return m
 
 
 def kb_packs(cat):
+    load_emoji()
     m = types.InlineKeyboardMarkup()
     for p in cat.get("packs") or []:
         if not p.get("enabled", True):
             continue
         n = pack_stock_count(p)
+        icon = p.get("icon") or ("🔴" if n <= 0 else "🟢")
         if n <= 0:
-            m.add(types.InlineKeyboardButton(f"🔴 {p.get('name')} - ${p.get('price'):.2f} (Out)", callback_data="noop", color="danger"))
+            label = product_btn_label(icon, p.get("name") or "", f"- ${p.get('price'):.2f} (Out)")
+            m.add(types.InlineKeyboardButton(label, callback_data="noop", color="danger"))
         else:
+            label = product_btn_label(icon, p.get("name") or "", f"- ${p.get('price'):.2f} ({n})")
             m.add(
                 types.InlineKeyboardButton(
-                    f"🟢 {p.get('name')} - ${p.get('price'):.2f} ({n})",
+                    label,
                     callback_data=f"pack:{cat['id']}:{p['id']}",
                     color="active",
                 )
@@ -626,12 +673,16 @@ def kb_admin_home():
 
 
 def kb_admin_products(store):
+    load_emoji()
     m = types.InlineKeyboardMarkup()
     for c in store.get("categories") or []:
         en = "✅" if c.get("enabled", True) else "⛔"
+        label = product_btn_label(c.get("icon") or "📦", f"{en} {c.get('name')}")
+        # keep enabled mark then icon+name: "✅ 📦 Name" -> use icon as primary premium
+        label = f"{en} " + product_btn_label(c.get("icon") or "📦", c.get("name") or "")
         m.add(
             types.InlineKeyboardButton(
-                f"{en} {c.get('icon') or '📦'} {c.get('name')}",
+                label,
                 callback_data=f"ad:cat:{c['id']}",
                 color="active",
             )
@@ -656,9 +707,11 @@ def kb_admin_cat(cat):
     for p in cat.get("packs") or []:
         st = pack_stock_count(p)
         en = "✅" if p.get("enabled", True) else "⛔"
+        ic = p.get("icon") or "📦"
+        label = f"{en} " + product_btn_label(ic, f"{p.get('name')} ${p.get('price'):.2f} · {st}")
         m.add(
             types.InlineKeyboardButton(
-                f"{en} {p.get('name')} ${p.get('price'):.2f} · {st}",
+                label,
                 callback_data=f"ad:pack:{cat['id']}:{p['id']}",
                 color="active",
             )
@@ -673,6 +726,7 @@ def kb_admin_pack(cat_id, pack):
     m.add(types.InlineKeyboardButton("🔑 បន្ថែម Stock", callback_data=f"ad:addstock:{cat_id}:{pack['id']}", color="progress"))
     m.add(types.InlineKeyboardButton("💵 កែតម្លៃ", callback_data=f"ad:price:{cat_id}:{pack['id']}", color="active"))
     m.add(types.InlineKeyboardButton("✏️ ឈ្មោះ Pack", callback_data=f"ad:renamepack:{cat_id}:{pack['id']}", color="progress"))
+    m.add(types.InlineKeyboardButton("🎨 Icon Pack", callback_data=f"ad:iconpack:{cat_id}:{pack['id']}", color="progress"))
     m.add(
         types.InlineKeyboardButton(
             "⛔ បិទ Pack" if pack.get("enabled", True) else "✅ បើក Pack",
@@ -1508,9 +1562,24 @@ def handle_admin_cb(c: types.CallbackQuery):
         cat_id = data.split(":", 2)[2]
         _wait[uid] = {"action": "icon_cat", "cat_id": cat_id}
         bot.answer_callback_query(c.id)
-        edit("ផ្ញើ icon (emoji 1 តួ):", types.InlineKeyboardMarkup().add(
-            types.InlineKeyboardButton("⬅️", callback_data=f"ad:cat:{cat_id}")
-        ))
+        edit(
+            "🎨 ផ្ញើ <b>Premium emoji</b> 1 តួ (ឬ unicode)\nនឹងដាក់មុខឈ្មោះ product:",
+            types.InlineKeyboardMarkup().add(
+                types.InlineKeyboardButton("⬅️", callback_data=f"ad:cat:{cat_id}", color="inactive")
+            ),
+        )
+        return
+
+    if data.startswith("ad:iconpack:"):
+        _, _, cat_id, pack_id = data.split(":", 3)
+        _wait[uid] = {"action": "icon_pack", "cat_id": cat_id, "pack_id": pack_id}
+        bot.answer_callback_query(c.id)
+        edit(
+            "🎨 ផ្ញើ <b>Premium emoji</b> សម្រាប់ pack នេះ:",
+            types.InlineKeyboardMarkup().add(
+                types.InlineKeyboardButton("⬅️", callback_data=f"ad:pack:{cat_id}:{pack_id}", color="inactive")
+            ),
+        )
         return
 
     if data.startswith("ad:newpack:"):
@@ -1803,16 +1872,42 @@ def on_wizard(msg):
 
     if action == "new_cat":
         _wait.pop(uid, None)
-        name = (msg.text or "").strip()
-        if not name:
+        raw = (msg.text or "").strip()
+        if not raw:
             bot.reply_to(msg, "Empty")
             return
+        ch, cid_em = extract_premium_from_msg(msg)
+        name = raw
+        icon = "📦"
+        # strip leading emoji from name if present
+        for k in _EMOJI_CHARS_SORTED:
+            if name.startswith(k):
+                icon = k
+                name = name[len(k):].strip()
+                break
+        if ch and (not name or name == raw):
+            # whole message was emoji-only + name after
+            parts = raw.split(None, 1)
+            if len(parts) == 2:
+                icon, name = parts[0], parts[1]
+            elif ch:
+                icon = ch
+        if not name:
+            name = raw
+        if cid_em and icon:
+            EMOJI_MAP[icon] = cid_em
+            save_emoji()
+            load_emoji()
         cid = slugify(name) + "_" + uuid.uuid4().hex[:4]
         store.setdefault("categories", []).append(
-            {"id": cid, "name": name, "icon": "📦", "enabled": True, "packs": []}
+            {"id": cid, "name": name, "icon": icon, "enabled": True, "packs": []}
         )
         save_store(store)
-        bot.reply_to(msg, f"✅ Category <b>{esc(name)}</b> · id <code>{cid}</code>")
+        bot.reply_to(
+            msg,
+            f"✅ Category {icon} <b>{esc(name)}</b> · id <code>{cid}</code>"
+            + (" · premium icon OK" if cid_em else "\n💡 កំណត់ premium នៅ Emoji menu ឬ 🎨 Icon"),
+        )
         bot.send_message(msg.chat.id, "📦 Products", reply_markup=kb_admin_products(store))
         return
 
@@ -1830,10 +1925,53 @@ def on_wizard(msg):
         cat_id = st.get("cat_id")
         _wait.pop(uid, None)
         cat = find_cat(store, cat_id)
-        if cat and msg.text:
-            cat["icon"] = msg.text.strip()[:4]
+        ch, cid = extract_premium_from_msg(msg)
+        if not cat:
+            bot.reply_to(msg, "Category gone")
+            return
+        if not ch and not cid:
+            bot.reply_to(msg, "ផ្ញើ emoji (premium កាន់តែល្អ)")
+            return
+        if not ch:
+            ch = "✨"
+        cat["icon"] = ch
+        if cid:
+            EMOJI_MAP[ch] = cid
+            EMOJI_MAP[_norm_emoji(ch)] = cid
+            EMOJI_MAP[_norm_emoji(ch) + "️"] = cid
+            # ensure char in list for future regex
+            if ch not in _EMOJI_CHAR_LIST:
+                _EMOJI_CHAR_LIST.append(ch)
+            save_emoji()
+            load_emoji()
+            bot.reply_to(msg, f"✅ Icon premium {ch} → <code>{esc(cid)}</code>")
+        else:
             save_store(store)
-            bot.reply_to(msg, f"✅ Icon {cat['icon']}")
+            bot.reply_to(msg, f"✅ Icon {ch} (unicode — setup premium នៅ Emoji menu)")
+            return
+        save_store(store)
+        return
+
+    if action == "icon_pack":
+        cat_id, pack_id = st.get("cat_id"), st.get("pack_id")
+        _wait.pop(uid, None)
+        cat, pack = find_pack(store, cat_id, pack_id)
+        ch, cid = extract_premium_from_msg(msg)
+        if not pack:
+            bot.reply_to(msg, "Pack gone")
+            return
+        if not ch:
+            ch = "📦"
+        pack["icon"] = ch
+        if cid:
+            EMOJI_MAP[ch] = cid
+            EMOJI_MAP[_norm_emoji(ch)] = cid
+            save_emoji()
+            load_emoji()
+            bot.reply_to(msg, f"✅ Pack icon premium {ch} → <code>{esc(cid)}</code>")
+        else:
+            bot.reply_to(msg, f"✅ Pack icon {ch}")
+        save_store(store)
         return
 
     if action == "new_pack":
@@ -1856,7 +1994,7 @@ def on_wizard(msg):
             return
         pid = slugify(name) + "_" + uuid.uuid4().hex[:4]
         cat.setdefault("packs", []).append(
-            {"id": pid, "name": name, "price": price, "stock": [], "stock_type": "text", "enabled": True}
+            {"id": pid, "name": name, "price": price, "stock": [], "stock_type": "text", "enabled": True, "icon": "🟢"}
         )
         save_store(store)
         bot.reply_to(msg, f"✅ Pack <b>{esc(name)}</b> ${price:.2f} · <code>{pid}</code>")
