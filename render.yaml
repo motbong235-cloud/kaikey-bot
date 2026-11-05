@@ -5,14 +5,22 @@ services:
     plan: starter
     buildCommand: pip install -r requirements.txt
     startCommand: python bot.py
+    disk:
+      name: kaikey-data
+      mountPath: /var/data
+      sizeGB: 1
     envVars:
       - key: BOT_TOKEN
         sync: false
       - key: ADMIN_IDS
         sync: false
+      - key: DATA_DIR
+        value: /var/data
       - key: KHMER_API_KEY
         sync: false
       - key: KHMER_PROFILE_KEY
         sync: false
       - key: CHANNEL_ID
         sync: false
+      - key: BOT_NAME
+        value: KaiKey Store

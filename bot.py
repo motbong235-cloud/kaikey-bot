@@ -219,8 +219,16 @@ KHMER_API_KEY = os.getenv("KHMER_API_KEY", "").strip()
 KHMER_PROFILE_KEY = os.getenv("KHMER_PROFILE_KEY", "").strip()
 CHANNEL_ID = os.getenv("CHANNEL_ID", "").strip()
 BOT_NAME = os.getenv("BOT_NAME", "KaiKey Store")
-DATA_DIR = Path(os.getenv("DATA_DIR") or Path(__file__).parent / "data")
-DATA_DIR.mkdir(parents=True, exist_ok=True)
+# Persist on Render: set DATA_DIR=/var/data + attach Disk (mount /var/data)
+_default_data = Path("/var/data") if Path("/var/data").is_dir() else (Path(__file__).parent / "data")
+DATA_DIR = Path(os.getenv("DATA_DIR") or _default_data)
+try:
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+except Exception as e:
+    print("[KaiKey] DATA_DIR mkdir fail", DATA_DIR, e)
+    DATA_DIR = Path(__file__).parent / "data"
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+print("[KaiKey] DATA_DIR =", DATA_DIR)
 
 STORE_FILE = DATA_DIR / "store.json"
 ORDERS_FILE = DATA_DIR / "orders.json"
@@ -336,27 +344,62 @@ DEFAULT_EMOJI = {}
 
 def _read(path: Path, default):
     with _lock:
-        if not path.exists():
-            return json.loads(json.dumps(default))
-        try:
-            return json.loads(path.read_text(encoding="utf-8"))
-        except Exception:
-            return json.loads(json.dumps(default))
+        candidates = [path, path.with_suffix(path.suffix + ".bak"), path.with_name(path.name + ".bak")]
+        for cand in candidates:
+            if not cand.exists():
+                continue
+            try:
+                raw = cand.read_text(encoding="utf-8").strip()
+                if not raw:
+                    continue
+                data = json.loads(raw)
+                if data is None:
+                    continue
+                # recover primary from bak
+                if cand != path and data:
+                    try:
+                        path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+                        print("[KaiKey] recovered", path.name, "from", cand.name)
+                    except Exception:
+                        pass
+                return data
+            except Exception as e:
+                print("[KaiKey] read fail", cand, e)
+        return json.loads(json.dumps(default)) if default is not None else None
 
 
 def _write(path: Path, data):
     with _lock:
-        tmp = path.with_suffix(".tmp")
-        tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+        path.parent.mkdir(parents=True, exist_ok=True)
+        payload = json.dumps(data, ensure_ascii=False, indent=2)
+        tmp = path.with_suffix(path.suffix + ".tmp")
+        tmp.write_text(payload, encoding="utf-8")
+        # backup previous good file
+        if path.exists():
+            try:
+                bak = path.with_suffix(path.suffix + ".bak")
+                path.replace(bak)
+            except Exception:
+                try:
+                    bak = path.with_name(path.name + ".bak")
+                    bak.write_text(path.read_text(encoding="utf-8"), encoding="utf-8")
+                except Exception:
+                    pass
         tmp.replace(path)
 
 
 def load_store():
-    s = _read(STORE_FILE, None)
-    if not s:
-        _write(STORE_FILE, DEFAULT_STORE)
-        return json.loads(json.dumps(DEFAULT_STORE))
-    return s
+    """Never overwrite existing products/stock on deploy. Seed defaults only first run."""
+    if STORE_FILE.exists() or STORE_FILE.with_suffix(".json.bak").exists() or (DATA_DIR / "store.json.bak").exists():
+        s = _read(STORE_FILE, None)
+        if isinstance(s, dict) and s:
+            return s
+        print("[KaiKey] WARN store unreadable — try backup only, not full default wipe")
+        s = _read(STORE_FILE, {})
+        return s if isinstance(s, dict) else {}
+    print("[KaiKey] first run — seed DEFAULT_STORE at", STORE_FILE)
+    _write(STORE_FILE, DEFAULT_STORE)
+    return json.loads(json.dumps(DEFAULT_STORE))
 
 
 def save_store(s):
@@ -2361,7 +2404,9 @@ def on_wizard(msg):
 def main():
     global _CLONE_API
     print(f"[KaiKeyBot] {BOT_NAME} admins={ADMIN_IDS}")
-    load_store()
+    print("[KaiKey] loading store from", STORE_FILE)
+    store0 = load_store()
+    print("[KaiKey] categories:", len((store0 or {}).get("categories") or []))
     load_emoji()
     try:
         from clones_addon import setup_clones
