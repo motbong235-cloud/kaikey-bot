@@ -1895,8 +1895,17 @@ def cmd_settutorial(msg):
     bot.reply_to(msg, "✅ Tutorial video set")
 
 
+def _wait_action(m):
+    if not m.from_user:
+        return ""
+    return str((_wait.get(m.from_user.id) or {}).get("action") or "")
+
+
 @bot.message_handler(
-    func=lambda m: m.from_user and m.from_user.id in _wait,
+    func=lambda m: m.from_user
+    and m.from_user.id in _wait
+    and not _wait_action(m).startswith("clone_")
+    and not _wait_action(m).startswith("admin_clone_"),
     content_types=["text", "document", "photo", "video"],
 )
 def on_wizard(msg):

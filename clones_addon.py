@@ -195,9 +195,12 @@ def setup_clones(bot, types, *, data_dir: Path, admin_ids: set, kh_tz, wait: dic
 
         if data == "ad:clone_free":
             bot.answer_callback_query(c.id)
-            wait[uid] = {"action": "admin_clone_free"}
+            wait[uid] = {"action": "admin_clone_name"}
             edit(
-                "🎁 <b>បង្កើត Clone Free</b>\nផ្ញើ 3 បន្ទាត់:\n<code>ShopName\nBOT_TOKEN\nADMIN_ID</code>",
+                "🎁 <b>បង្កើត Clone Free</b>\n\n"
+                "ជំហាន <b>1/3</b>\n"
+                "ផ្ញើ <b>ឈ្មោះ Shop</b>\n\n"
+                "បោះបង់: /cancel",
                 types.InlineKeyboardMarkup().add(
                     types.InlineKeyboardButton("⬅️", callback_data="ad:clones", color="inactive")
                 ),
@@ -393,41 +396,88 @@ def setup_clones(bot, types, *, data_dir: Path, admin_ids: set, kh_tz, wait: dic
                 f"Token: <code>{_esc(mask_token(st.get('bot_token')))}</code>"
             )
 
-    @bot.message_handler(func=lambda m: (wait.get(m.from_user.id) or {}).get("action") == "admin_clone_free")
-    def on_admin_clone_free(msg):
+    @bot.message_handler(
+        func=lambda m: str((wait.get(m.from_user.id) or {}).get("action") or "").startswith("admin_clone_")
+    )
+    def on_admin_clone_steps(msg):
         if not is_admin(msg.from_user.id):
             return
-        wait.pop(msg.from_user.id, None)
-        parts = [ln.strip() for ln in (msg.text or "").splitlines() if ln.strip()]
-        if len(parts) < 3:
-            bot.reply_to(msg, "ត្រូវ 3 បន្ទាត់: ShopName / TOKEN / ADMIN_ID")
+        uid = msg.from_user.id
+        st = wait.get(uid) or {}
+        action = st.get("action")
+        text_in = (msg.text or "").strip()
+        if text_in.startswith("/"):
             return
-        name, tok, aid_s = parts[0], parts[1], parts[2]
-        try:
-            aid = int(aid_s)
-        except ValueError:
-            bot.reply_to(msg, "Admin ID invalid")
+
+        if action == "admin_clone_name":
+            if len(text_in) < 2:
+                bot.reply_to(msg, "ឈ្មោះខ្លីពេក — ផ្ញើម្តងទៀត")
+                return
+            st["shop_name"] = text_in[:64]
+            st["action"] = "admin_clone_token"
+            wait[uid] = st
+            bot.reply_to(
+                msg,
+                "✅ Shop: <b>" + _esc(st["shop_name"]) + "</b>\n\n"
+                "ជំហាន <b>2/3</b>\n"
+                "ផ្ញើ <b>Bot Token</b>\n"
+                "<code>123456:AAE...</code>\n\n"
+                "បោះបង់: /cancel",
+            )
             return
-        if ":" not in tok:
-            bot.reply_to(msg, "Token invalid")
+
+        if action == "admin_clone_token":
+            tok = text_in.replace(" ", "")
+            if ":" not in tok or len(tok) < 30:
+                bot.reply_to(msg, "Token មិនត្រឹមត្រូវ — ផ្ញើម្តងទៀត")
+                return
+            st["bot_token"] = tok
+            st["action"] = "admin_clone_admin"
+            wait[uid] = st
+            bot.reply_to(
+                msg,
+                "✅ រក្សាទុក Token\n\n"
+                "ជំហាន <b>3/3</b>\n"
+                "ផ្ញើ <b>Admin ID</b> (លេខ)\n"
+                "ឧ. <code>123456789</code>\n\n"
+                "បោះបង់: /cancel",
+            )
             return
-        cid = "c_" + uuid.uuid4().hex[:10]
-        clones = load_clones()
-        clones[cid] = {
-            "id": cid,
-            "shop_name": name[:64],
-            "bot_token": tok.strip(),
-            "admin_id": aid,
-            "owner_id": msg.from_user.id,
-            "status": "active",
-            "paid_until": extend_paid_until(30),
-            "created_at": now_kh(),
-            "price": 0,
-            "free": True,
-        }
-        save_clones(clones)
-        ok, info = start_clone_runner(cid)
-        bot.reply_to(msg, f"✅ Free clone <b>{_esc(name)}</b>\n<code>{cid}</code>\nrunner: {ok} {_esc(info)}")
+
+        if action == "admin_clone_admin":
+            try:
+                aid = int(text_in)
+            except ValueError:
+                bot.reply_to(msg, "Admin ID ត្រូវជាលេខ — ផ្ញើម្តងទៀត")
+                return
+            wait.pop(uid, None)
+            name = st.get("shop_name") or "Shop"
+            tok = st.get("bot_token") or ""
+            cid = "c_" + uuid.uuid4().hex[:10]
+            clones = load_clones()
+            clones[cid] = {
+                "id": cid,
+                "shop_name": name[:64],
+                "bot_token": tok,
+                "admin_id": aid,
+                "owner_id": uid,
+                "status": "active",
+                "paid_until": extend_paid_until(30),
+                "created_at": now_kh(),
+                "price": 0,
+                "free": True,
+            }
+            save_clones(clones)
+            ok, info = start_clone_runner(cid)
+            bot.reply_to(
+                msg,
+                "✅ Free clone <b>" + _esc(name) + "</b>\n"
+                "<code>" + cid + "</code>\n"
+                "Admin: <code>" + str(aid) + "</code>\n"
+                "Paid until: <code>" + str(clones[cid].get("paid_until")) + "</code>\n"
+                "runner: " + str(ok) + " " + _esc(info),
+            )
+            return
 
     return {
         "start_all_active_clones": start_all_active_clones,
