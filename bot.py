@@ -589,6 +589,7 @@ def kb_main():
     load_emoji()
     m = types.ReplyKeyboardMarkup(resize_keyboard=True)
     m.row(types.KeyboardButton("🛒 BUY NOW", color="active"))
+    m.row(types.KeyboardButton("🤖 បង្កើត Shop Bot", color="progress"))
     return m
 
 
@@ -668,6 +669,7 @@ def kb_admin_home():
         types.InlineKeyboardButton("⚙️ Settings", callback_data="ad:settings", color="progress"),
         types.InlineKeyboardButton("📊 Stats", callback_data="ad:stats", color="active"),
     )
+    m.add(types.InlineKeyboardButton("🤖 Bot Clones", callback_data="ad:clones", color="active"))
     m.add(types.InlineKeyboardButton("🔄 Refresh", callback_data="ad:home", color="inactive"))
     return m
 
@@ -1222,6 +1224,24 @@ def handle_admin_cb(c: types.CallbackQuery):
         edit(admin_stats_text(), kb_admin_home())
         return
 
+    global _CLONE_API
+    if _CLONE_API and data.startswith("ad:clone"):
+        def _edit(t, m=None):
+            try:
+                bot.edit_message_text(t, c.message.chat.id, c.message.message_id, reply_markup=m)
+            except Exception:
+                bot.send_message(c.message.chat.id, t, reply_markup=m)
+        if _CLONE_API["handle_admin_clone_cb"](c, data, uid, _edit):
+            return
+    if data == "ad:clones" or (data or "").startswith("ad:clone"):
+        if _CLONE_API:
+            def _edit2(t, m=None):
+                try:
+                    bot.edit_message_text(t, c.message.chat.id, c.message.message_id, reply_markup=m)
+                except Exception:
+                    bot.send_message(c.message.chat.id, t, reply_markup=m)
+            if _CLONE_API["handle_admin_clone_cb"](c, data, uid, _edit2):
+                return
     if data == "ad:products":
         bot.answer_callback_query(c.id)
         edit("📦 <b>Products / Categories</b>\nចុច category ដើម្បីកែ · ឬបង្កើតថ្មី", kb_admin_products(store))
@@ -2083,9 +2103,27 @@ def on_wizard(msg):
 
 
 def main():
+    global _CLONE_API
     print(f"[KaiKeyBot] {BOT_NAME} admins={ADMIN_IDS}")
     load_store()
     load_emoji()
+    try:
+        from clones_addon import setup_clones
+        _CLONE_API = setup_clones(
+            bot,
+            types,
+            data_dir=DATA_DIR,
+            admin_ids=ADMIN_IDS,
+            kh_tz=KH_TZ,
+            wait=_wait,
+            notify_admins=notify_admins,
+            now_kh=now_kh,
+            is_admin=is_admin,
+        )
+        _CLONE_API["start_all_active_clones"]()
+        print("[KaiKeyBot] clones addon OK")
+    except Exception as e:
+        print("[KaiKeyBot] clones addon fail:", e)
     port = os.getenv("PORT")
     if port:
         from http.server import BaseHTTPRequestHandler, HTTPServer
