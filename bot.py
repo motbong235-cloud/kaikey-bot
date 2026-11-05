@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-KaiKey Bot — sell Mode / File Key / DNS
+Spider Mode VPN — sell Mode / File Key / DNS
 User: /start → BUY NOW → Categories → Pack → Cart → ABA QR → auto key
 Admin: full panel — products, stock, emoji premium, broadcast, users, orders, settings
 """
@@ -218,17 +218,17 @@ KHMER_API_URL = (os.getenv("KHMER_API_URL") or "https://khmer-system.com").rstri
 KHMER_API_KEY = os.getenv("KHMER_API_KEY", "").strip()
 KHMER_PROFILE_KEY = os.getenv("KHMER_PROFILE_KEY", "").strip()
 CHANNEL_ID = os.getenv("CHANNEL_ID", "").strip()
-BOT_NAME = os.getenv("BOT_NAME", "KaiKey Store")
+BOT_NAME = os.getenv("BOT_NAME", "Spider Mode VPN")
 # Persist on Render: set DATA_DIR=/var/data + attach Disk (mount /var/data)
 _default_data = Path("/var/data") if Path("/var/data").is_dir() else (Path(__file__).parent / "data")
 DATA_DIR = Path(os.getenv("DATA_DIR") or _default_data)
 try:
     DATA_DIR.mkdir(parents=True, exist_ok=True)
 except Exception as e:
-    print("[KaiKey] DATA_DIR mkdir fail", DATA_DIR, e)
+    print("[SpiderMode] DATA_DIR mkdir fail", DATA_DIR, e)
     DATA_DIR = Path(__file__).parent / "data"
     DATA_DIR.mkdir(parents=True, exist_ok=True)
-print("[KaiKey] DATA_DIR =", DATA_DIR)
+print("[SpiderMode] DATA_DIR =", DATA_DIR)
 
 STORE_FILE = DATA_DIR / "store.json"
 ORDERS_FILE = DATA_DIR / "orders.json"
@@ -359,12 +359,12 @@ def _read(path: Path, default):
                 if cand != path and data:
                     try:
                         path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
-                        print("[KaiKey] recovered", path.name, "from", cand.name)
+                        print("[SpiderMode] recovered", path.name, "from", cand.name)
                     except Exception:
                         pass
                 return data
             except Exception as e:
-                print("[KaiKey] read fail", cand, e)
+                print("[SpiderMode] read fail", cand, e)
         return json.loads(json.dumps(default)) if default is not None else None
 
 
@@ -394,10 +394,10 @@ def load_store():
         s = _read(STORE_FILE, None)
         if isinstance(s, dict) and s:
             return s
-        print("[KaiKey] WARN store unreadable — try backup only, not full default wipe")
+        print("[SpiderMode] WARN store unreadable — try backup only, not full default wipe")
         s = _read(STORE_FILE, {})
         return s if isinstance(s, dict) else {}
-    print("[KaiKey] first run — seed DEFAULT_STORE at", STORE_FILE)
+    print("[SpiderMode] first run — seed DEFAULT_STORE at", STORE_FILE)
     _write(STORE_FILE, DEFAULT_STORE)
     return json.loads(json.dumps(DEFAULT_STORE))
 
@@ -1123,7 +1123,7 @@ def msg_tutorial(msg):
     store = load_store()
     tut = (store.get("tutorial_video") or "").strip()
     cap = (
-        "🎬 <b>របៀបប្រើ KaiKey</b>\n\n"
+        "🎬 <b>របៀបប្រើ Spider Mode VPN</b>\n\n"
         "1) ចុច <b>BUY NOW</b>\n"
         "2) ជ្រើស Category → Pack\n"
         "3) បង់ប្រាក់ ABA QR\n"
@@ -2248,10 +2248,10 @@ def on_wizard(msg):
 
 
 def main():
-    print(f"[KaiKeyBot] {BOT_NAME} admins={ADMIN_IDS}")
-    print("[KaiKey] loading store from", STORE_FILE)
+    print(f"[SpiderMode] {BOT_NAME} admins={ADMIN_IDS}")
+    print("[SpiderMode] loading store from", STORE_FILE)
     store0 = load_store()
-    print("[KaiKey] categories:", len((store0 or {}).get("categories") or []))
+    print("[SpiderMode] categories:", len((store0 or {}).get("categories") or []))
     load_emoji()
     port = os.getenv("PORT")
     if port:

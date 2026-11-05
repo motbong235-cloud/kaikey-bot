@@ -1,7 +1,7 @@
-# KaiKey Bot (`@KaiKeyBot`)
+# Spider Mode VPN Bot
 
 Telegram shop — **Mode / File Key / DNS**  
-Brand: **KaiKey** (Kairozen)
+Brand: **Spider Mode VPN**
 
 ## User flow
 `/start` → BUY NOW → Categories → Pack → Cart → **ABA QR** → auto Key/File
@@ -27,7 +27,7 @@ ADMIN_IDS=
 KHMER_API_KEY=
 KHMER_PROFILE_KEY=
 CHANNEL_ID=
-BOT_NAME=KaiKey Store
+BOT_NAME=Spider Mode VPN
 ```
 
 ## Deploy
@@ -37,4 +37,4 @@ python bot.py
 ```
 Or connect repo on Render — `render.yaml` uses **starter** plan.
 
-Suggested username: **@KaiKeyBot**
+Suggested username: set in @BotFather
