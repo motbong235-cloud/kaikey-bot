@@ -641,11 +641,25 @@ def create_qr(amount: float, order_id: str, remark: str = ""):
                 return {
                     "ok": True,
                     "transaction_id": str(
-                        d.get("transaction_id") or d.get("tran_id") or d.get("id") or d.get("reference") or order_id
+                        d.get("transaction_id")
+                        or d.get("payment_id")
+                        or d.get("tran_id")
+                        or d.get("id")
+                        or d.get("reference")
+                        or order_id
                     ),
-                    "qr_image": d.get("qr_image") or d.get("qr_url") or d.get("image") or d.get("qr"),
-                    "qr_string": d.get("qr_string") or d.get("qr_data") or d.get("khqr"),
-                    "deeplink": d.get("deeplink") or d.get("aba_deeplink") or d.get("app_link") or "",
+                    "qr_image": d.get("qr_image") or d.get("card_image") or d.get("qr_url") or d.get("image") or d.get("qr"),
+                    "qr_string": d.get("qr_string") or d.get("qr_data") or d.get("khqr") or d.get("qr"),
+                    "deeplink": (
+                        d.get("deeplink")
+                        or d.get("aba_deeplink")
+                        or d.get("app_link")
+                        or d.get("pay_url")
+                        or d.get("payment_url")
+                        or d.get("open_url")
+                        or ""
+                    ),
+                    "pay_url": d.get("pay_url") or d.get("payment_url") or d.get("deeplink") or "",
                 }
             last_err = data.get("error") or data.get("message") or f"HTTP {r.status_code}"
         except Exception as e:
@@ -661,9 +675,11 @@ def check_payment(transaction_id: str):
     if not transaction_id:
         return {"paid": False}
     headers = {"Content-Type": "application/json"}
+    key = KHMER_API_KEY_ or KHMER_PROFILE_KEY_
     urls = [
-        (f"{KHMER_API_URL_}/api/qr/status", {"api_key": KHMER_API_KEY_ or KHMER_PROFILE_KEY_, "transaction_id": transaction_id}),
-        (f"{KHMER_API_URL_}/api/v1/qr/check", {"key": KHMER_API_KEY_ or KHMER_PROFILE_KEY_, "transaction_id": transaction_id}),
+        (f"{KHMER_API_URL_}/aba-api/check-payment", {"api_key": key, "payment_id": transaction_id}),
+        (f"{KHMER_API_URL_}/api/qr/status", {"api_key": key, "transaction_id": transaction_id}),
+        (f"{KHMER_API_URL_}/api/v1/qr/check", {"key": key, "transaction_id": transaction_id}),
     ]
     for url, body in urls:
         try:
@@ -734,15 +750,18 @@ def kb_packs(cat):
 
 def kb_cart(order_id: str):
     m = types.InlineKeyboardMarkup()
-    m.add(types.InlineKeyboardButton("💳 បង់ប្រាក់ (ABA PAY)", callback_data=f"pay:{order_id}", color="active"))
+    m.add(types.InlineKeyboardButton("💳 បង់ប្រាក់ (ABA PayWay)", callback_data=f"pay:{order_id}", color="active"))
     m.add(types.InlineKeyboardButton("⬅️ Back", callback_data="cats", color="inactive"))
     return m
 
 
-def kb_qr(order_id: str, deeplink: str = ""):
+def kb_qr(order_id: str, deeplink: str = "", pay_url: str = ""):
     m = types.InlineKeyboardMarkup()
-    if deeplink:
-        m.add(types.InlineKeyboardButton("📱 Open ABA Mobile", url=deeplink, color="active"))
+    link = (deeplink or pay_url or "").strip()
+    if link and not (link.startswith("http://") or link.startswith("https://")):
+        link = ""
+    if link:
+        m.add(types.InlineKeyboardButton("📱 OPEN ABA Mobile", url=link, color="active"))
     m.add(types.InlineKeyboardButton("❌ Cancel QR / បោះបង់", callback_data=f"cancel:{order_id}", color="danger"))
     return m
 
@@ -1234,7 +1253,7 @@ def on_cb(c: types.CallbackQuery):
             f"━━━━━━━━━━━━\n"
             f"📦 · ចំនួន៖ {order['qty']}\n"
             f"💰 · សរុប៖ <b>${order['total']:.2f}</b>\n\n"
-            "ចុច <b>បង់ប្រាក់ (ABA PAY)</b> ដើម្បីបង្កើត QR"
+            "ចុច <b>បង់ប្រាក់ (ABA PayWay)</b> ដើម្បីបង្កើត QR"
         )
         bot.send_message(chat_id, text, reply_markup=kb_cart(order["id"]))
         return
@@ -1262,7 +1281,7 @@ def on_cb(c: types.CallbackQuery):
         orders[oid] = o
         save_orders(orders)
         caption = (
-            "💳 <b>ABA PAY WAY (KHQR)</b>\n"
+            "💳 <b>ABA PayWay</b>\n"
             f"- 💵 ចំនួនត្រូវ pay : <b>${o['total']:.2f}</b>\n"
             f"- 📦 ទំនិញ : {esc(o.get('pack_name'))} x{o.get('qty')}\n"
             f"- 🔖 Ref : <code>{esc(o.get('transaction_id'))}</code>\n"
@@ -1530,7 +1549,7 @@ def handle_admin_cb(c: types.CallbackQuery):
                 callback_data="ad:togmaint",
             )
         )
-        m.add(types.InlineKeyboardButton("🔑 API Key (Khmer-system)", callback_data="ad:set_api_key", color="active"))
+        m.add(types.InlineKeyboardButton("🔑 API Key (ABA PayWay)", callback_data="ad:set_api_key", color="active"))
         m.add(types.InlineKeyboardButton("🖥 Machine / Merchant ID", callback_data="ad:set_merchant", color="active"))
         m.add(types.InlineKeyboardButton("👤 Profile Key", callback_data="ad:set_profile_key", color="progress"))
         m.add(types.InlineKeyboardButton("🌐 API URL", callback_data="ad:set_api_url", color="progress"))
@@ -1571,7 +1590,7 @@ def handle_admin_cb(c: types.CallbackQuery):
         bot.answer_callback_query(c.id)
         _wait[uid] = {"action": "set_khmer_api_key"}
         edit(
-            "🔑 <b>Khmer-system API Key</b>\n\nផ្ញើ API Key\nលុប: <code>/clear</code>\n/cancel",
+            "🔑 <b>ABA PayWay API Key</b>\n\nផ្ញើ API Key\nលុប: <code>/clear</code>\n/cancel",
             types.InlineKeyboardMarkup().add(
                 types.InlineKeyboardButton("⬅️", callback_data="ad:settings", color="inactive")
             ),
