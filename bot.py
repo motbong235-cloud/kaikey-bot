@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-ModeKey Bot — sell Mode / File Key / DNS
+KaiKey Bot — sell Mode / File Key / DNS
 User: /start → BUY NOW → Categories → Pack → Cart → ABA QR → auto key
 Admin: full panel — products, stock, emoji premium, broadcast, users, orders, settings
 """
@@ -30,7 +30,7 @@ KHMER_API_URL = (os.getenv("KHMER_API_URL") or "https://khmer-system.com").rstri
 KHMER_API_KEY = os.getenv("KHMER_API_KEY", "").strip()
 KHMER_PROFILE_KEY = os.getenv("KHMER_PROFILE_KEY", "").strip()
 CHANNEL_ID = os.getenv("CHANNEL_ID", "").strip()
-BOT_NAME = os.getenv("BOT_NAME", "ModeKey Store")
+BOT_NAME = os.getenv("BOT_NAME", "KaiKey Store")
 DATA_DIR = Path(os.getenv("DATA_DIR") or Path(__file__).parent / "data")
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -1386,7 +1386,7 @@ def on_wizard(msg):
 
 
 def main():
-    print(f"[ModeKeyBot] {BOT_NAME} admins={ADMIN_IDS}")
+    print(f"[KaiKeyBot] {BOT_NAME} admins={ADMIN_IDS}")
     load_store()
     load_emoji()
     port = os.getenv("PORT")

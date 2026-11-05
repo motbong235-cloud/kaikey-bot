@@ -1,6 +1,6 @@
 services:
   - type: web
-    name: mode-key-bot
+    name: kaikey-bot
     runtime: python
     plan: starter
     buildCommand: pip install -r requirements.txt
