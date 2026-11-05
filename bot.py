@@ -1038,6 +1038,142 @@ def msg_buy(msg):
     bot.send_message(msg.chat.id, "🛒 <b>Categories all</b>\nជ្រើសប្រភេទទំនិញ៖", reply_markup=kb_categories(store))
 
 
+
+def _is_create_shop_btn(text):
+    if not text:
+        return False
+    t = text.replace("🤖", "").strip().lower()
+    return (
+        "បង្កើត shop bot" in t
+        or "បង្កើត shop" in t
+        or "create shop" in t
+        or ("shop bot" in t and "បង្កើត" in text)
+    )
+
+
+@bot.message_handler(func=lambda m: m.text and _is_create_shop_btn(m.text))
+def msg_create_shop_bot(msg):
+    touch_user(msg)
+    uid = msg.from_user.id
+    _wait[uid] = {"action": "clone_shop_name"}
+    bot.send_message(
+        msg.chat.id,
+        "🤖 <b>បង្កើត Shop Bot</b>\n"
+        "តម្លៃ: <b>$9.99 / month</b>\n\n"
+        "ជំហាន <b>1/3</b>\n"
+        "ផ្ញើ <b>ឈ្មោះ Shop</b> (ឧ. Roma Key Store)\n\n"
+        "បោះបង់: /cancel",
+    )
+
+
+@bot.message_handler(commands=["cancel"])
+def cmd_cancel_wait(msg):
+    if msg.from_user.id in _wait:
+        _wait.pop(msg.from_user.id, None)
+        bot.reply_to(msg, "បានបោះបង់។")
+    else:
+        bot.reply_to(msg, "គ្មានអ្វីកំពុងធ្វើទេ។")
+
+
+@bot.message_handler(
+    func=lambda m: m.from_user and str((_wait.get(m.from_user.id) or {}).get("action") or "").startswith("clone_"),
+    content_types=["text"],
+)
+def on_clone_steps(msg):
+    uid = msg.from_user.id
+    st = _wait.get(uid) or {}
+    action = st.get("action")
+    text_in = (msg.text or "").strip()
+    if text_in.startswith("/"):
+        return
+
+    if action == "clone_shop_name":
+        if len(text_in) < 2:
+            bot.reply_to(msg, "ឈ្មោះខ្លីពេក — ផ្ញើម្តងទៀត")
+            return
+        st["shop_name"] = text_in[:64]
+        st["action"] = "clone_token"
+        _wait[uid] = st
+        bot.reply_to(
+            msg,
+            "✅ Shop: <b>" + esc(st["shop_name"]) + "</b>\n\n"
+            "ជំហាន <b>2/3</b>\n"
+            "ផ្ញើ <b>Bot Token</b> ពី @BotFather\n"
+            "<code>123456:AAE...</code>\n\n"
+            "បោះបង់: /cancel",
+        )
+        return
+
+    if action == "clone_token":
+        tok = text_in.replace(" ", "")
+        if ":" not in tok or len(tok) < 30:
+            bot.reply_to(msg, "Token មិនត្រឹមត្រូវ — ផ្ញើម្តងទៀត")
+            return
+        st["bot_token"] = tok
+        st["action"] = "clone_admin"
+        _wait[uid] = st
+        bot.reply_to(
+            msg,
+            "✅ រក្សាទុក Token\n\n"
+            "ជំហាន <b>3/3</b>\n"
+            "ផ្ញើ <b>Admin ID</b> (លេខ)\n"
+            "ឧ. <code>123456789</code>\n\n"
+            "បោះបង់: /cancel",
+        )
+        return
+
+    if action == "clone_admin":
+        try:
+            aid = int(text_in)
+        except ValueError:
+            bot.reply_to(msg, "Admin ID ត្រូវជាលេខ — ផ្ញើម្តងទៀត")
+            return
+        _wait.pop(uid, None)
+        import uuid as _uuid
+        cid = "c_" + _uuid.uuid4().hex[:10]
+        clones_file = DATA_DIR / "clones.json"
+        try:
+            clones = json.loads(clones_file.read_text(encoding="utf-8")) if clones_file.exists() else {}
+        except Exception:
+            clones = {}
+        price = float(os.getenv("CLONE_PRICE", "9.99"))
+        support = os.getenv("SUPPORT_USER", "kairozen_support")
+        clones[cid] = {
+            "id": cid,
+            "shop_name": st.get("shop_name"),
+            "bot_token": st.get("bot_token"),
+            "admin_id": aid,
+            "owner_id": uid,
+            "status": "pending_payment",
+            "paid_until": "",
+            "created_at": now_kh(),
+            "price": price,
+        }
+        clones_file.write_text(json.dumps(clones, ensure_ascii=False, indent=2), encoding="utf-8")
+        tok = st.get("bot_token") or ""
+        mask = (tok[:8] + "…" + tok[-4:]) if len(tok) > 12 else "***"
+        m = types.InlineKeyboardMarkup()
+        m.add(types.InlineKeyboardButton("💬 Support @" + support, url="https://t.me/" + support))
+        shop = esc(st.get("shop_name"))
+        body = (
+            "✅ <b>បង្កើតរួច</b>\n"
+            "ID: <code>" + cid + "</code>\n"
+            "Shop: <b>" + shop + "</b>\n"
+            "Admin: <code>" + str(aid) + "</code>\n"
+            "Token: <code>" + esc(mask) + "</code>\n"
+            "Status: <b>pending_payment</b>\n\n"
+            "💵 $" + ("%.2f" % price) + "/month\n"
+            "ទាក់ទង <b>@" + support + "</b> ដើម្បីបង់ប្រាក់\n"
+            "Admin នឹង Activate ឲ្យ។"
+        )
+        bot.send_message(msg.chat.id, body, reply_markup=m)
+        try:
+            notify_admins("🤖 Clone pending <code>" + cid + "</code> · " + shop + " · " + str(uid))
+        except Exception:
+            pass
+        return
+
+
 @bot.message_handler(func=lambda m: m.text and ("បង្រៀន" in (m.text or "") or "Tutorial" in (m.text or "")))
 def msg_tutorial(msg):
     store = load_store()
@@ -1759,7 +1895,10 @@ def cmd_settutorial(msg):
     bot.reply_to(msg, "✅ Tutorial video set")
 
 
-@bot.message_handler(content_types=["text", "document", "photo", "video"])
+@bot.message_handler(
+    func=lambda m: m.from_user and m.from_user.id in _wait,
+    content_types=["text", "document", "photo", "video"],
+)
 def on_wizard(msg):
     uid = msg.from_user.id
     if uid not in _wait or not is_admin(uid):
