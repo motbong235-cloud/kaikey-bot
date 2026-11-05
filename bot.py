@@ -19,6 +19,175 @@ from pathlib import Path
 import requests
 import telebot
 from telebot import types
+from telebot.types import InlineKeyboardButton as _IKB_orig
+from telebot.types import KeyboardButton as _KB_orig
+from telebot.types import MessageEntity as _MessageEntity
+import re as _re
+
+# ─── Premium emoji (Kai- style): char → custom_emoji_id ───────────────────
+_EMOJI_CHAR_LIST = [
+    '🛒', '📦', '💬', '🔑', '💵', '💳', '✅', '❌', '⚠️', '👥',
+    '📊', '📢', '⚙️', '✨', '🟢', '🔴', '⬅️', '➕', '✏️', '🗑',
+    '📱', '🧾', '🔢', '💰', '📘', '💀', '🟣', '👋', '🔗', '🌲',
+    '⏱', '🔖', '🎨', '🛡', '🔄', '📋', '📤', '🎬', '🏠', '❓',
+    '🛠', '💎', '⭐', '🔥', '🎯', '📁', '🔐', '💡', '🎉', '📌',
+]
+EMOJI_MAP = {ch: None for ch in _EMOJI_CHAR_LIST}
+_STRIPPED_TEXT_MAP = {}
+
+def _valid_emoji_id(eid):
+    if eid is None:
+        return None
+    s = str(eid).strip()
+    if not s or s.lower() in ("none", "null", "0"):
+        return None
+    if s.isdigit() and len(s) >= 8:
+        return s
+    try:
+        n = int(float(s))
+        if n > 0:
+            return str(n)
+    except Exception:
+        pass
+    return s if len(s) >= 8 else None
+
+_EMOJI_CHARS_SORTED = sorted(EMOJI_MAP.keys(), key=len, reverse=True)
+_LEADING_EMOJI_RE = _re.compile("^(" + "|".join(_re.escape(c) for c in _EMOJI_CHARS_SORTED) + ")")
+_EMOJI_ANY_RE = _re.compile("(" + "|".join(_re.escape(c) for c in _EMOJI_CHARS_SORTED) + ")")
+
+def _norm_emoji(ch):
+    return (ch or "").replace("\ufe0f", "")
+
+def _lookup_emoji_id(ch):
+    if not ch:
+        return None
+    eid = _valid_emoji_id(EMOJI_MAP.get(ch))
+    if eid:
+        return eid
+    n = _norm_emoji(ch)
+    for k, v in EMOJI_MAP.items():
+        eid = _valid_emoji_id(v)
+        if eid and (k == ch or _norm_emoji(k) == n):
+            return eid
+    return None
+
+def _leading_emoji(text):
+    if not text:
+        return None
+    m = _LEADING_EMOJI_RE.match(text)
+    return m.group(1) if m else None
+
+def _entities_for_emoji_text(text):
+    if not text:
+        return []
+    entities, utf16_pos, idx = [], 0, 0
+    while idx < len(text):
+        m = _EMOJI_ANY_RE.match(text, idx)
+        if m:
+            ch = m.group(1)
+            length = len(ch.encode("utf-16-le")) // 2
+            eid = _lookup_emoji_id(ch)
+            if eid:
+                entities.append(_MessageEntity(type="custom_emoji", offset=utf16_pos, length=length, custom_emoji_id=str(eid)))
+            utf16_pos += length
+            idx += len(ch)
+        else:
+            c = text[idx]
+            utf16_pos += len(c.encode("utf-16-le")) // 2
+            idx += 1
+    return entities
+
+def _strip_leading_emoji_text(text, ch):
+    if not text or not ch:
+        return text
+    if text.startswith(ch):
+        return text[len(ch):].lstrip()
+    n = _norm_emoji(ch)
+    if n and text.startswith(n):
+        return text[len(n):].lstrip()
+    return text
+
+def _strip_emoji_once(text, ch):
+    if not text or not ch:
+        return text
+    for v in (ch, _norm_emoji(ch)):
+        if not v:
+            continue
+        i = text.find(v)
+        if i >= 0:
+            return (text[:i] + text[i + len(v):]).replace("  ", " ").strip()
+    return text
+
+_COLOR_MAP = {"active": "success", "progress": "primary", "danger": "danger", "inactive": None, "default": None}
+
+def _to_style(color):
+    if not color:
+        return None
+    return _COLOR_MAP.get(color, color if color in ("danger", "primary", "success") else None)
+
+class InlineKeyboardButton(_IKB_orig):
+    def __init__(self, *args, color=None, emoji_id=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._color = color
+        label = kwargs.get("text") if "text" in kwargs else (args[0] if args else None)
+        self._emoji_char = _leading_emoji(label)
+        self._emoji_id = emoji_id
+
+    def _resolve_emoji_id(self):
+        if self._emoji_id:
+            return _valid_emoji_id(self._emoji_id)
+        return _lookup_emoji_id(self._emoji_char)
+
+    def to_dict(self):
+        d = super().to_dict()
+        style = _to_style(self._color)
+        if style:
+            d["style"] = style
+        eid = self._resolve_emoji_id()
+        if eid and "text" in d:
+            original = d["text"]
+            d["icon_custom_emoji_id"] = eid
+            stripped = _strip_leading_emoji_text(original, self._emoji_char)
+            if stripped == original and self._emoji_char:
+                stripped = _strip_emoji_once(original, self._emoji_char)
+            if stripped != original:
+                _STRIPPED_TEXT_MAP[stripped] = original
+                d["text"] = stripped or original
+        return d
+
+class KeyboardButton(_KB_orig):
+    def __init__(self, *args, color=None, emoji_id=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._color = color
+        label = kwargs.get("text") if "text" in kwargs else (args[0] if args else None)
+        self._emoji_char = _leading_emoji(label)
+        self._emoji_id = emoji_id
+
+    def _resolve_emoji_id(self):
+        if self._emoji_id:
+            return _valid_emoji_id(self._emoji_id)
+        return _lookup_emoji_id(self._emoji_char)
+
+    def to_dict(self):
+        d = super().to_dict()
+        style = _to_style(self._color)
+        if style:
+            d["style"] = style
+        eid = self._resolve_emoji_id()
+        if eid and "text" in d:
+            original = d["text"]
+            d["icon_custom_emoji_id"] = eid
+            stripped = _strip_leading_emoji_text(original, self._emoji_char)
+            if stripped == original and self._emoji_char:
+                stripped = _strip_emoji_once(original, self._emoji_char)
+            if stripped != original:
+                _STRIPPED_TEXT_MAP[stripped] = original
+                d["text"] = stripped or original
+        return d
+
+types.InlineKeyboardButton = InlineKeyboardButton
+types.KeyboardButton = KeyboardButton
+
 
 BOT_TOKEN = os.getenv("BOT_TOKEN", "").strip()
 ADMIN_IDS = {
@@ -100,20 +269,7 @@ DEFAULT_STORE = {
 }
 
 # Premium custom emoji ids (Telegram premium) — admin can set
-DEFAULT_EMOJI = {
-    "buy": "",
-    "cart": "",
-    "money": "",
-    "pack": "",
-    "ok": "",
-    "warn": "",
-    "key": "",
-    "user": "",
-    "stats": "",
-    "broadcast": "",
-    "settings": "",
-    "category": "",
-}
+DEFAULT_EMOJI = {}
 
 
 def _read(path: Path, default):
@@ -162,14 +318,25 @@ def save_users(u):
 
 
 def load_emoji():
-    e = _read(EMOJI_FILE, DEFAULT_EMOJI)
-    for k, v in DEFAULT_EMOJI.items():
-        e.setdefault(k, v)
-    return e
+    """Load char→custom_emoji_id into global EMOJI_MAP (Kai- style)."""
+    global EMOJI_MAP, _EMOJI_CHARS_SORTED, _LEADING_EMOJI_RE, _EMOJI_ANY_RE
+    data = _read(EMOJI_FILE, {}) or {}
+    for ch in list(EMOJI_MAP.keys()):
+        if ch in data and data[ch]:
+            EMOJI_MAP[ch] = str(data[ch]).strip()
+    for k, v in data.items():
+        if k and v:
+            EMOJI_MAP[str(k)] = str(v).strip()
+    _EMOJI_CHARS_SORTED = sorted(EMOJI_MAP.keys(), key=len, reverse=True)
+    if _EMOJI_CHARS_SORTED:
+        _LEADING_EMOJI_RE = _re.compile("^(" + "|".join(_re.escape(c) for c in _EMOJI_CHARS_SORTED) + ")")
+        _EMOJI_ANY_RE = _re.compile("(" + "|".join(_re.escape(c) for c in _EMOJI_CHARS_SORTED) + ")")
+    return {k: v for k, v in EMOJI_MAP.items() if v}
 
 
-def save_emoji(e):
-    _write(EMOJI_FILE, e)
+def save_emoji(e=None):
+    data = e if e is not None else {k: v for k, v in EMOJI_MAP.items() if v}
+    _write(EMOJI_FILE, data)
 
 
 def load_settings():
@@ -200,15 +367,6 @@ def esc(s):
 
 
 def pe(key: str, fallback: str = "") -> str:
-    """Premium emoji entity as plain unicode fallback, or custom tag if id set."""
-    e = load_emoji()
-    cid = (e.get(key) or "").strip()
-    # If admin stored a custom_emoji_id, we still need entities — for simplicity
-    # store both: if looks like numeric id, return fallback char and use entities in send helpers
-    if cid.isdigit() and len(cid) >= 5:
-        return fallback or "•"
-    if cid and not cid.isdigit():
-        return cid  # actual emoji char stored
     return fallback or ""
 
 
@@ -466,16 +624,59 @@ def kb_admin_pack(cat_id, pack):
     return m
 
 
-def kb_emoji_menu():
-    e = load_emoji()
-    keys = ["buy", "cart", "money", "pack", "ok", "warn", "key", "user", "stats", "broadcast", "settings", "category"]
-    m = types.InlineKeyboardMarkup(row_width=2)
-    for k in keys:
-        val = e.get(k) or "—"
-        short = (val[:8] + "…") if len(str(val)) > 8 else val
-        m.add(types.InlineKeyboardButton(f"{k}: {short}", callback_data=f"ad:emset:{k}"))
+def kb_emoji_menu(per_row=5):
+    """Grid of unicode emojis used in bot — ✅ = has premium id."""
+    load_emoji()
+    m = types.InlineKeyboardMarkup(row_width=per_row)
+    row = []
+    for ch in _EMOJI_CHAR_LIST:
+        mark = "✅" if _valid_emoji_id(EMOJI_MAP.get(ch)) else "⬜"
+        # callback cannot always carry full emoji safely — use index
+        idx = _EMOJI_CHAR_LIST.index(ch)
+        row.append(types.InlineKeyboardButton(f"{mark}{ch}", callback_data=f"ad:emset:{idx}"))
+        if len(row) >= per_row:
+            m.row(*row)
+            row = []
+    if row:
+        m.row(*row)
+    m.add(types.InlineKeyboardButton("📋 Set many (reply message)", callback_data="ad:emmulti"))
+    m.add(types.InlineKeyboardButton("👁 Preview", callback_data="ad:empreview"))
     m.add(types.InlineKeyboardButton("⬅️ Admin", callback_data="ad:home"))
     return m
+
+
+def _apply_setemojis_from_message(src_msg):
+    """Map premium custom_emoji entities in a message onto unicode chars in same text (Kai-)."""
+    text = src_msg.text or src_msg.caption or ""
+    ents = list(src_msg.entities or []) + list(src_msg.caption_entities or [])
+    applied = []
+    for e in ents:
+        if getattr(e, "type", None) != "custom_emoji":
+            continue
+        cid = str(getattr(e, "custom_emoji_id", "") or "")
+        if not _valid_emoji_id(cid):
+            continue
+        # Telegram entity offsets are UTF-16
+        # Extract the underlying character(s) at that span from text — often a normal emoji
+        # Approximate: find any known EMOJI_MAP char near that region by scanning text
+        # Prefer: pair by order of appearance of custom_emoji with leading normal emoji in text
+        applied.append(cid)
+    # Pair sequential normal emojis in text with sequential custom_emoji ids
+    normals = _EMOJI_ANY_RE.findall(text) if text else []
+    customs = []
+    for e in ents:
+        if getattr(e, "type", None) == "custom_emoji" and _valid_emoji_id(getattr(e, "custom_emoji_id", None)):
+            customs.append(str(e.custom_emoji_id))
+    n = min(len(normals), len(customs))
+    report = []
+    for i in range(n):
+        ch, cid = normals[i], customs[i]
+        EMOJI_MAP[ch] = cid
+        report.append(f"{ch} → <code>{cid}</code>")
+    if report:
+        save_emoji()
+        load_emoji()
+    return report
 
 
 # ─── Orders / deliver ─────────────────────────────────────────────────────
@@ -951,24 +1152,98 @@ def handle_admin_cb(c: types.CallbackQuery):
 
     if data == "ad:emoji":
         bot.answer_callback_query(c.id)
+        set_n = sum(1 for v in EMOJI_MAP.values() if _valid_emoji_id(v))
         edit(
-            "✨ <b>Emoji Premium Setup</b>\n\n"
-            "ចុច key → ផ្ញើ custom emoji (Premium) ឬ emoji ធម្មតា\n"
-            "Telegram custom_emoji_id: ផ្ញើតែលេខ id\n\n"
-            "Keys: buy cart money pack ok warn key user stats broadcast settings category",
+            "✨ <b>Emoji Premium Setup</b> (Kai- style)\n\n"
+            f"កំណត់រួច: <b>{set_n}</b> / {len(_EMOJI_CHAR_LIST)}\n\n"
+            "• ចុច emoji ⬜ → ផ្ញើ <b>Premium emoji</b> មួយ\n"
+            "• ឬ <b>Set many</b>: reply សារមាន premium emoji ច្រើន\n"
+            "• ប៊ូតុងដែលចាប់ផ្តើមដោយ emoji នឹងបង្ហាញ premium icon ស្វ័យប្រវត្តិ",
             kb_emoji_menu(),
         )
+        return
+
+    if data == "ad:emmulti":
+        bot.answer_callback_query(c.id)
+        _wait[uid] = {"action": "set_emoji_multi"}
+        m = types.InlineKeyboardMarkup()
+        m.add(types.InlineKeyboardButton("⬅️ Emoji", callback_data="ad:emoji"))
+        edit(
+            "📋 <b>Set many</b>\n\n"
+            "ផ្ញើសារមួយដែលមាន <b>emoji ធម្មតា + premium emoji</b>\n"
+            "(ឬ premium តាមលំដាប់ emoji ក្នុង bot)\n\n"
+            "ឧទាហរណ៍: 🛒📦🔑 ជាមួយ premium icons",
+            m,
+        )
+        return
+
+    if data == "ad:empreview":
+        bot.answer_callback_query(c.id)
+        load_emoji()
+        parts, entities, offset = [], [], 0
+        for ch in _EMOJI_CHAR_LIST:
+            eid = _valid_emoji_id(EMOJI_MAP.get(ch))
+            if not eid:
+                continue
+            parts.append(ch + " ")
+            length = len(ch.encode("utf-16-le")) // 2
+            entities.append(
+                _MessageEntity(
+                    type="custom_emoji",
+                    offset=offset,
+                    length=length,
+                    custom_emoji_id=str(eid),
+                )
+            )
+            offset += length + 1
+        if not parts:
+            bot.send_message(chat_id, "មិនទាន់មាន emoji premium — ចុច ⬜ ដើម្បីកំណត់")
+            return
+        prefix = "Preview:\n"
+        body = "".join(parts)
+        prefix_u16 = len(prefix.encode("utf-16-le")) // 2
+        try:
+            bot.send_message(
+                chat_id,
+                prefix + body,
+                entities=[
+                    _MessageEntity(
+                        type="custom_emoji",
+                        offset=e.offset + prefix_u16,
+                        length=e.length,
+                        custom_emoji_id=e.custom_emoji_id,
+                    )
+                    for e in entities
+                ],
+            )
+        except Exception as ex:
+            lines = "\n".join(
+                f"{ch} <code>{EMOJI_MAP.get(ch)}</code>"
+                for ch in _EMOJI_CHAR_LIST
+                if EMOJI_MAP.get(ch)
+            )
+            bot.send_message(chat_id, "Preview (ids):\n" + lines)
+            bot.send_message(chat_id, f"entities err: <code>{esc(ex)}</code>")
         return
 
     if data.startswith("ad:emset:"):
         key = data.split(":", 2)[2]
         bot.answer_callback_query(c.id)
-        _wait[uid] = {"action": "set_emoji", "key": key}
+        try:
+            idx = int(key)
+            ch = _EMOJI_CHAR_LIST[idx]
+        except Exception:
+            ch = key
+        _wait[uid] = {"action": "set_emoji", "key": ch}
         m = types.InlineKeyboardMarkup()
         m.add(types.InlineKeyboardButton("⬅️ Emoji", callback_data="ad:emoji"))
+        cur = EMOJI_MAP.get(ch) or "—"
         edit(
-            f"✨ Set emoji for <code>{esc(key)}</code>\n\n"
-            "ផ្ញើ:\n• emoji មួយតួ\n• ឬ custom_emoji_id (លេខ)\n• ឬ /clear ដើម្បីលុប",
+            f"✨ Set premium for {ch}\n"
+            f"Current id: <code>{esc(cur)}</code>\n\n"
+            "ផ្ញើ:\n• <b>Premium emoji</b> មួយ\n"
+            "• ឬ custom_emoji_id លេខ\n"
+            "• ឬ /clear ដើម្បីលុប",
             m,
         )
         return
@@ -1230,26 +1505,52 @@ def on_wizard(msg):
         bot.send_message(msg.chat.id, f"✅ Broadcast រួច · ok={ok} fail={fail}", reply_markup=kb_admin_home())
         return
 
-    if action == "set_emoji":
-        key = st.get("key")
+    if action == "set_emoji_multi":
         _wait.pop(uid, None)
-        e = load_emoji()
-        if msg.text and msg.text.strip().lower() == "/clear":
-            e[key] = ""
+        report = _apply_setemojis_from_message(msg)
+        if not report:
+            bot.reply_to(msg, "រកមិនឃើញ custom_emoji ក្នុងសារ — ផ្ញើ premium emoji")
         else:
-            # Prefer custom_emoji from entities
-            ents = msg.entities or []
-            cid = None
-            for ent in ents:
-                if ent.type == "custom_emoji" and getattr(ent, "custom_emoji_id", None):
-                    cid = str(ent.custom_emoji_id)
-                    break
-            if cid:
-                e[key] = cid
-            else:
-                e[key] = (msg.text or "").strip()[:32]
-        save_emoji(e)
-        bot.reply_to(msg, f"✅ emoji <code>{esc(key)}</code> = <code>{esc(e.get(key))}</code>")
+            bot.reply_to(msg, "✅ កំណត់:\n" + "\n".join(report))
+        bot.send_message(msg.chat.id, "✨ Emoji Premium", reply_markup=kb_emoji_menu())
+        return
+
+    if action == "set_emoji":
+        key = st.get("key")  # unicode char
+        _wait.pop(uid, None)
+        if msg.text and msg.text.strip().lower() == "/clear":
+            EMOJI_MAP[key] = None
+            save_emoji()
+            load_emoji()
+            bot.reply_to(msg, f"✅ cleared {key}")
+            bot.send_message(msg.chat.id, "✨ Emoji Premium", reply_markup=kb_emoji_menu())
+            return
+        cid = None
+        for ent in (msg.entities or []):
+            if ent.type == "custom_emoji" and getattr(ent, "custom_emoji_id", None):
+                cid = str(ent.custom_emoji_id)
+                break
+        if not cid and msg.text and msg.text.strip().isdigit():
+            cid = msg.text.strip()
+        if not cid:
+            bot.reply_to(msg, "ផ្ញើ Premium emoji ឬ custom_emoji_id លេខ")
+            return
+        if not _valid_emoji_id(cid):
+            bot.reply_to(msg, "id មិនត្រឹមត្រូវ")
+            return
+        EMOJI_MAP[key] = cid
+        save_emoji()
+        load_emoji()
+        bot.reply_to(msg, f"✅ {key} → <code>{esc(cid)}</code>")
+        # preview single
+        try:
+            bot.send_message(
+                msg.chat.id,
+                key,
+                entities=[_MessageEntity(type="custom_emoji", offset=0, length=len(key.encode("utf-16-le"))//2, custom_emoji_id=cid)],
+            )
+        except Exception as ex:
+            bot.send_message(msg.chat.id, f"preview err: {esc(ex)}")
         bot.send_message(msg.chat.id, "✨ Emoji Premium", reply_markup=kb_emoji_menu())
         return
 
