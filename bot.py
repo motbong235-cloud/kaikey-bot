@@ -286,6 +286,8 @@ DEFAULT_STORE = {
         "Pls click button <b>BUY NOW</b>"
     ),
     "welcome_video": "",
+    "welcome_banner": "",
+    "tutorial_video": "",
     "categories": [
         {
             "id": "vpn_drip",
@@ -545,14 +547,14 @@ def check_payment(transaction_id: str):
 def kb_main():
     load_emoji()
     m = types.ReplyKeyboardMarkup(resize_keyboard=True)
-    m.row(types.KeyboardButton("🛒 BUY NOW"))
-    m.row(types.KeyboardButton("📦 ការបញ្ជាទិញរបស់ខ្ញុំ"), types.KeyboardButton("💬 Support"))
+    m.row(types.KeyboardButton("🛒 BUY NOW", color="active"))
+    m.row(types.KeyboardButton("🎬 បង្រៀនប្រើ", color="progress"))
     return m
 
 
 def kb_buy_inline():
     m = types.InlineKeyboardMarkup()
-    m.add(types.InlineKeyboardButton("🛒 BUY NOW", callback_data="buy"))
+    m.add(types.InlineKeyboardButton("🛒 BUY NOW", callback_data="buy", color="active"))
     return m
 
 
@@ -588,7 +590,7 @@ def kb_packs(cat):
 
 def kb_cart(order_id: str):
     m = types.InlineKeyboardMarkup()
-    m.add(types.InlineKeyboardButton("💳 បង់ប្រាក់ (ABA PAY)", callback_data=f"pay:{order_id}"))
+    m.add(types.InlineKeyboardButton("💳 បង់ប្រាក់ (ABA PAY)", callback_data=f"pay:{order_id}", color="active"))
     m.add(types.InlineKeyboardButton("⬅️ Back", callback_data="cats"))
     return m
 
@@ -597,23 +599,23 @@ def kb_qr(order_id: str, deeplink: str = ""):
     m = types.InlineKeyboardMarkup()
     if deeplink:
         m.add(types.InlineKeyboardButton("📱 Open ABA Mobile", url=deeplink))
-    m.add(types.InlineKeyboardButton("❌ Cancel QR / បោះបង់", callback_data=f"cancel:{order_id}"))
+    m.add(types.InlineKeyboardButton("❌ Cancel QR / បោះបង់", callback_data=f"cancel:{order_id}", color="danger"))
     return m
 
 
 def kb_admin_home():
     m = types.InlineKeyboardMarkup(row_width=2)
     m.add(
-        types.InlineKeyboardButton("📦 Products", callback_data="ad:products"),
-        types.InlineKeyboardButton("🔑 Stock", callback_data="ad:stock"),
+        types.InlineKeyboardButton("📦 Products", callback_data="ad:products", color="active"),
+        types.InlineKeyboardButton("🔑 Stock", callback_data="ad:stock", color="progress"),
     )
     m.add(
-        types.InlineKeyboardButton("📋 Orders", callback_data="ad:orders"),
+        types.InlineKeyboardButton("📋 Orders", callback_data="ad:orders", color="active"),
         types.InlineKeyboardButton("👥 Users", callback_data="ad:users"),
     )
     m.add(
-        types.InlineKeyboardButton("📢 Broadcast", callback_data="ad:broadcast"),
-        types.InlineKeyboardButton("✨ Emoji Premium", callback_data="ad:emoji"),
+        types.InlineKeyboardButton("📢 Broadcast", callback_data="ad:broadcast", color="progress"),
+        types.InlineKeyboardButton("✨ Emoji Premium", callback_data="ad:emoji", color="active"),
     )
     m.add(
         types.InlineKeyboardButton("⚙️ Settings", callback_data="ad:settings"),
@@ -903,16 +905,26 @@ def cmd_start(msg):
         return
     store = load_store()
     name = esc(msg.from_user.first_name or "friend")
-    text = (store.get("welcome_text") or DEFAULT_STORE["welcome_text"]).format(name=name, bot=esc(BOT_NAME))
-    vid = store.get("welcome_video") or ""
-    if vid:
+    wtext = (store.get("welcome_text") or DEFAULT_STORE["welcome_text"]).format(name=name, bot=esc(BOT_NAME))
+    banner = (store.get("welcome_banner") or "").strip()
+    welcome_vid = (store.get("welcome_video") or "").strip()
+    if banner:
         try:
-            bot.send_video(msg.chat.id, vid, caption=text, reply_markup=kb_buy_inline())
-            bot.send_message(msg.chat.id, "👇", reply_markup=kb_main())
-            return
+            bot.send_photo(msg.chat.id, banner)
         except Exception:
-            pass
-    bot.send_message(msg.chat.id, text, reply_markup=kb_buy_inline())
+            try:
+                bot.send_document(msg.chat.id, banner)
+            except Exception:
+                pass
+    sent = False
+    if welcome_vid:
+        try:
+            bot.send_video(msg.chat.id, welcome_vid, caption=wtext, reply_markup=kb_buy_inline())
+            sent = True
+        except Exception:
+            sent = False
+    if not sent:
+        bot.send_message(msg.chat.id, wtext, reply_markup=kb_buy_inline())
     api_send_message(msg.chat.id, "ជ្រើសមុខងារ៖", reply_markup=kb_main(), parse_mode="HTML")
 
 
@@ -934,29 +946,26 @@ def msg_buy(msg):
     bot.send_message(msg.chat.id, "🛒 <b>Categories all</b>\nជ្រើសប្រភេទទំនិញ៖", reply_markup=kb_categories(store))
 
 
-@bot.message_handler(func=lambda m: m.text and "Support" in (m.text or ""))
-def msg_support(msg):
-    st = load_settings()
-    bot.send_message(msg.chat.id, st.get("support_text") or "💬 Support")
+@bot.message_handler(func=lambda m: m.text and ("បង្រៀន" in (m.text or "") or "Tutorial" in (m.text or "")))
+def msg_tutorial(msg):
+    store = load_store()
+    tut = (store.get("tutorial_video") or "").strip()
+    cap = (
+        "🎬 <b>របៀបប្រើ KaiKey</b>\n\n"
+        "1) ចុច <b>BUY NOW</b>\n"
+        "2) ជ្រើស Category → Pack\n"
+        "3) បង់ប្រាក់ ABA QR\n"
+        "4) ទទួល Key / File ស្វ័យប្រវត្តិ"
+    )
+    if tut:
+        try:
+            bot.send_video(msg.chat.id, tut, caption=cap)
+            return
+        except Exception:
+            pass
+    bot.send_message(msg.chat.id, cap + "\n\n⚠️ Admin មិនទាន់ upload video បង្រៀន — /admin → Settings")
 
 
-@bot.message_handler(func=lambda m: m.text and "ការបញ្ជាទិញ" in (m.text or ""))
-def msg_my_orders(msg):
-    orders = load_orders()
-    mine = [o for o in orders.values() if o.get("user_id") == msg.from_user.id]
-    mine = sorted(mine, key=lambda x: x.get("created_at") or "", reverse=True)[:10]
-    if not mine:
-        bot.send_message(msg.chat.id, "អត់មាន order ទេ។")
-        return
-    lines = ["📦 <b>Orders ថ្មីៗ</b>\n"]
-    for o in mine:
-        lines.append(
-            f"• <code>{esc(o['id'])}</code> · {esc(o.get('pack_name'))} · ${o.get('total')} · <b>{esc(o.get('status'))}</b>"
-        )
-    bot.send_message(msg.chat.id, "\n".join(lines))
-
-
-# ─── Callbacks: user + admin ──────────────────────────────────────────────
 @bot.callback_query_handler(func=lambda c: True)
 def on_cb(c: types.CallbackQuery):
     data = c.data or ""
@@ -1318,10 +1327,12 @@ def handle_admin_cb(c: types.CallbackQuery):
                 callback_data="ad:togmaint",
             )
         )
+        m.add(types.InlineKeyboardButton("✏️ Welcome text", callback_data="ad:setwelcome", color="progress"))
+        m.add(types.InlineKeyboardButton("🖼 Upload Banner", callback_data="ad:setbanner", color="active"))
+        m.add(types.InlineKeyboardButton("🎬 Welcome Video", callback_data="ad:setwelcomevid", color="active"))
+        m.add(types.InlineKeyboardButton("🎥 Tutorial Video", callback_data="ad:settutorial", color="active"))
         m.add(types.InlineKeyboardButton("✏️ Support text", callback_data="ad:setsupport"))
-        m.add(types.InlineKeyboardButton("✏️ Welcome text", callback_data="ad:setwelcome"))
-        m.add(types.InlineKeyboardButton("🎬 Welcome video (reply)", callback_data="ad:setvideo_hint"))
-        m.add(types.InlineKeyboardButton("⬅️ Admin", callback_data="ad:home"))
+        m.add(types.InlineKeyboardButton("⬅️ Admin", callback_data="ad:home", color="inactive"))
         pay_ok = "✅" if (KHMER_API_KEY or KHMER_PROFILE_KEY) else "❌"
         edit(
             f"⚙️ <b>Settings</b>\n\n"
@@ -1361,8 +1372,31 @@ def handle_admin_cb(c: types.CallbackQuery):
         )
         return
 
-    if data == "ad:setvideo_hint":
-        bot.answer_callback_query(c.id, "Reply to a video with /setvideo", show_alert=True)
+    if data == "ad:setbanner":
+        bot.answer_callback_query(c.id)
+        _wait[uid] = {"action": "set_banner"}
+        edit(
+            "🖼 <b>Upload Banner Welcome</b>\n\nផ្ញើ <b>រូបភាព</b> (photo) ឥឡូវ:",
+            types.InlineKeyboardMarkup().add(types.InlineKeyboardButton("⬅️", callback_data="ad:settings")),
+        )
+        return
+
+    if data == "ad:setwelcomevid":
+        bot.answer_callback_query(c.id)
+        _wait[uid] = {"action": "set_welcome_video"}
+        edit(
+            "🎬 <b>Welcome Video</b>\n\nផ្ញើ <b>video</b> ឥឡូវ (បង្ហាញពេល /start):",
+            types.InlineKeyboardMarkup().add(types.InlineKeyboardButton("⬅️", callback_data="ad:settings")),
+        )
+        return
+
+    if data == "ad:settutorial":
+        bot.answer_callback_query(c.id)
+        _wait[uid] = {"action": "set_tutorial"}
+        edit(
+            "🎥 <b>Video បង្រៀនប្រើ bot</b>\n\nផ្ញើ <b>video</b> ឥឡូវ:",
+            types.InlineKeyboardMarkup().add(types.InlineKeyboardButton("⬅️", callback_data="ad:settings")),
+        )
         return
 
     if data == "ad:newcat":
@@ -1537,7 +1571,34 @@ def cmd_setvideo(msg):
     bot.reply_to(msg, "✅ Welcome video set")
 
 
-@bot.message_handler(content_types=["text", "document"])
+@bot.message_handler(commands=["setbanner"])
+def cmd_setbanner(msg):
+    if not is_admin(msg.from_user.id):
+        return
+    src = msg.reply_to_message
+    if not src or not (src.photo or src.document):
+        bot.reply_to(msg, "Reply to a photo with /setbanner")
+        return
+    store = load_store()
+    store["welcome_banner"] = src.photo[-1].file_id if src.photo else src.document.file_id
+    save_store(store)
+    bot.reply_to(msg, "✅ Banner set")
+
+
+@bot.message_handler(commands=["settutorial"])
+def cmd_settutorial(msg):
+    if not is_admin(msg.from_user.id):
+        return
+    if not msg.reply_to_message or not msg.reply_to_message.video:
+        bot.reply_to(msg, "Reply to a video with /settutorial")
+        return
+    store = load_store()
+    store["tutorial_video"] = msg.reply_to_message.video.file_id
+    save_store(store)
+    bot.reply_to(msg, "✅ Tutorial video set")
+
+
+@bot.message_handler(content_types=["text", "document", "photo", "video"])
 def on_wizard(msg):
     uid = msg.from_user.id
     if uid not in _wait or not is_admin(uid):
@@ -1613,6 +1674,44 @@ def on_wizard(msg):
         except Exception as ex:
             bot.send_message(msg.chat.id, f"preview err: {esc(ex)}")
         bot.send_message(msg.chat.id, "✨ Emoji Premium", reply_markup=kb_emoji_menu())
+        return
+
+    if action == "set_banner":
+        _wait.pop(uid, None)
+        store = load_store()
+        fid = None
+        if msg.photo:
+            fid = msg.photo[-1].file_id
+        elif msg.document:
+            fid = msg.document.file_id
+        if not fid:
+            bot.reply_to(msg, "ផ្ញើជា Photo")
+            return
+        store["welcome_banner"] = fid
+        save_store(store)
+        bot.reply_to(msg, "✅ Banner welcome រួច — /start ដើម្បីមើល")
+        return
+
+    if action == "set_welcome_video":
+        _wait.pop(uid, None)
+        store = load_store()
+        if not msg.video:
+            bot.reply_to(msg, "ផ្ញើជា Video")
+            return
+        store["welcome_video"] = msg.video.file_id
+        save_store(store)
+        bot.reply_to(msg, "✅ Welcome video រួច")
+        return
+
+    if action == "set_tutorial":
+        _wait.pop(uid, None)
+        store = load_store()
+        if not msg.video:
+            bot.reply_to(msg, "ផ្ញើជា Video")
+            return
+        store["tutorial_video"] = msg.video.file_id
+        save_store(store)
+        bot.reply_to(msg, "✅ Tutorial video រួច")
         return
 
     if action == "set_support":
