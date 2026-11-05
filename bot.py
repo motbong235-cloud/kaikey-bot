@@ -454,6 +454,7 @@ def load_settings():
             "khmer_api_url": "",
             "khmer_api_key": "",
             "khmer_profile_key": "",
+            "khmer_merchant_id": "",
         },
     )
 
@@ -467,7 +468,18 @@ def get_payment_cfg():
     url = (st.get("khmer_api_url") or KHMER_API_URL or "https://khmer-system.com").rstrip("/")
     api_key = (st.get("khmer_api_key") or KHMER_API_KEY or "").strip()
     profile_key = (st.get("khmer_profile_key") or KHMER_PROFILE_KEY or "").strip()
-    return {"url": url, "api_key": api_key, "profile_key": profile_key}
+    merchant_id = (
+        (st.get("khmer_merchant_id") or "")
+        or os.getenv("KHMER_MERCHANT_ID", "")
+        or os.getenv("ABA_MERCHANT_ID", "")
+        or ""
+    ).strip()
+    return {
+        "url": url,
+        "api_key": api_key,
+        "profile_key": profile_key,
+        "merchant_id": merchant_id,
+    }
 
 
 def mask_key(k: str) -> str:
@@ -581,16 +593,30 @@ def create_qr(amount: float, order_id: str, remark: str = ""):
     KHMER_API_URL_ = cfg["url"]
     KHMER_API_KEY_ = cfg["api_key"]
     KHMER_PROFILE_KEY_ = cfg["profile_key"]
+    MERCHANT_ID_ = cfg.get("merchant_id") or ""
     if not KHMER_API_KEY_ and not KHMER_PROFILE_KEY_:
         return {"ok": False, "error": "payment_not_configured"}
     headers = {"Content-Type": "application/json", "Accept": "application/json"}
+    key = KHMER_API_KEY_ or KHMER_PROFILE_KEY_
+    uname = ("u" + "".join(c for c in str(order_id) if c.isalnum()))[:20] or "user1"
+    amt = float(amount)
     payloads = [
+        {
+            "url": f"{KHMER_API_URL_}/aba-api/generate-qr",
+            "json": {
+                "api_key": key,
+                "merchant_id": MERCHANT_ID_ or key,
+                "username": uname,
+                "amount": amt,
+            },
+        },
         {
             "url": f"{KHMER_API_URL_}/api/qr/create",
             "json": {
-                "api_key": KHMER_API_KEY_ or KHMER_PROFILE_KEY_,
-                "profile_key": KHMER_PROFILE_KEY_ or KHMER_API_KEY_,
-                "amount": float(amount),
+                "api_key": key,
+                "profile_key": KHMER_PROFILE_KEY_ or key,
+                "merchant_id": MERCHANT_ID_ or "",
+                "amount": amt,
                 "order_id": order_id,
                 "remark": remark or order_id,
             },
@@ -598,8 +624,8 @@ def create_qr(amount: float, order_id: str, remark: str = ""):
         {
             "url": f"{KHMER_API_URL_}/api/v1/qr",
             "json": {
-                "key": KHMER_API_KEY_ or KHMER_PROFILE_KEY_,
-                "amount": float(amount),
+                "key": key,
+                "amount": amt,
                 "reference": order_id,
                 "description": remark or order_id,
             },
@@ -1505,6 +1531,7 @@ def handle_admin_cb(c: types.CallbackQuery):
             )
         )
         m.add(types.InlineKeyboardButton("🔑 API Key (Khmer-system)", callback_data="ad:set_api_key", color="active"))
+        m.add(types.InlineKeyboardButton("🖥 Machine / Merchant ID", callback_data="ad:set_merchant", color="active"))
         m.add(types.InlineKeyboardButton("👤 Profile Key", callback_data="ad:set_profile_key", color="progress"))
         m.add(types.InlineKeyboardButton("🌐 API URL", callback_data="ad:set_api_url", color="progress"))
         m.add(types.InlineKeyboardButton("✏️ Welcome text", callback_data="ad:setwelcome", color="progress"))
@@ -1521,6 +1548,7 @@ def handle_admin_cb(c: types.CallbackQuery):
             "Payment: " + pay_ok + "\n"
             "API URL: <code>" + esc(cfg["url"]) + "</code>\n"
             "API Key: <code>" + esc(mask_key(cfg["api_key"])) + "</code>\n"
+            "Machine ID: <code>" + esc(mask_key(cfg.get("merchant_id") or "")) + "</code>\n"
             "Profile Key: <code>" + esc(mask_key(cfg["profile_key"])) + "</code>\n"
             "Channel: <code>" + esc(CHANNEL_ID or "—") + "</code>\n"
             "Admins: " + str(len(ADMIN_IDS)) + "\n"
@@ -1544,6 +1572,20 @@ def handle_admin_cb(c: types.CallbackQuery):
         _wait[uid] = {"action": "set_khmer_api_key"}
         edit(
             "🔑 <b>Khmer-system API Key</b>\n\nផ្ញើ API Key\nលុប: <code>/clear</code>\n/cancel",
+            types.InlineKeyboardMarkup().add(
+                types.InlineKeyboardButton("⬅️", callback_data="ad:settings", color="inactive")
+            ),
+        )
+        return
+
+    if data == "ad:set_merchant":
+        bot.answer_callback_query(c.id)
+        _wait[uid] = {"action": "set_khmer_merchant"}
+        edit(
+            "🖥 <b>Machine / Merchant ID</b>\n\n"
+            "ផ្ញើ Merchant ID / Machine ID\n"
+            "លុប: <code>/clear</code>\n"
+            "បោះបង់: /cancel",
             types.InlineKeyboardMarkup().add(
                 types.InlineKeyboardButton("⬅️", callback_data="ad:settings", color="inactive")
             ),
@@ -1992,6 +2034,20 @@ def on_wizard(msg):
             st["khmer_api_key"] = val
             save_settings(st)
             bot.reply_to(msg, "✅ API Key · <code>" + esc(mask_key(val)) + "</code>")
+        return
+
+    if action == "set_khmer_merchant":
+        _wait.pop(uid, None)
+        st = load_settings()
+        val = (msg.text or "").strip()
+        if val.lower() in ("/clear", "clear", "-"):
+            st["khmer_merchant_id"] = ""
+            save_settings(st)
+            bot.reply_to(msg, "✅ លុប Machine / Merchant ID")
+        else:
+            st["khmer_merchant_id"] = val
+            save_settings(st)
+            bot.reply_to(msg, "✅ Machine ID · <code>" + esc(mask_key(val)) + "</code>")
         return
 
     if action == "set_khmer_profile_key":
