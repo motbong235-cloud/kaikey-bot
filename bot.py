@@ -559,12 +559,12 @@ def kb_buy_inline():
 
 def kb_categories(store):
     m = types.InlineKeyboardMarkup()
-    m.add(types.InlineKeyboardButton("🛒 Categories all 🔀", callback_data="cats"))
+    m.add(types.InlineKeyboardButton("🛒 Categories all 🔀", callback_data="cats", color="progress"))
     for c in store.get("categories") or []:
         if not c.get("enabled", True):
             continue
         icon = c.get("icon") or "📦"
-        m.add(types.InlineKeyboardButton(f"{icon} {c.get('name')}", callback_data=f"cat:{c['id']}"))
+        m.add(types.InlineKeyboardButton(f"{icon} {c.get('name')}", callback_data=f"cat:{c['id']}", color="active"))
     return m
 
 
@@ -575,29 +575,30 @@ def kb_packs(cat):
             continue
         n = pack_stock_count(p)
         if n <= 0:
-            m.add(types.InlineKeyboardButton(f"🔴 {p.get('name')} - ${p.get('price'):.2f} (Out)", callback_data="noop"))
+            m.add(types.InlineKeyboardButton(f"🔴 {p.get('name')} - ${p.get('price'):.2f} (Out)", callback_data="noop", color="danger"))
         else:
             m.add(
                 types.InlineKeyboardButton(
                     f"🟢 {p.get('name')} - ${p.get('price'):.2f} ({n})",
                     callback_data=f"pack:{cat['id']}:{p['id']}",
+                    color="active",
                 )
             )
-    m.add(types.InlineKeyboardButton("⬅️ Back ( Category )", callback_data="cats"))
+    m.add(types.InlineKeyboardButton("⬅️ Back ( Category )", callback_data="cats", color="inactive"))
     return m
 
 
 def kb_cart(order_id: str):
     m = types.InlineKeyboardMarkup()
     m.add(types.InlineKeyboardButton("💳 បង់ប្រាក់ (ABA PAY)", callback_data=f"pay:{order_id}", color="active"))
-    m.add(types.InlineKeyboardButton("⬅️ Back", callback_data="cats"))
+    m.add(types.InlineKeyboardButton("⬅️ Back", callback_data="cats", color="inactive"))
     return m
 
 
 def kb_qr(order_id: str, deeplink: str = ""):
     m = types.InlineKeyboardMarkup()
     if deeplink:
-        m.add(types.InlineKeyboardButton("📱 Open ABA Mobile", url=deeplink))
+        m.add(types.InlineKeyboardButton("📱 Open ABA Mobile", url=deeplink, color="active"))
     m.add(types.InlineKeyboardButton("❌ Cancel QR / បោះបង់", callback_data=f"cancel:{order_id}", color="danger"))
     return m
 
@@ -610,17 +611,17 @@ def kb_admin_home():
     )
     m.add(
         types.InlineKeyboardButton("📋 Orders", callback_data="ad:orders", color="active"),
-        types.InlineKeyboardButton("👥 Users", callback_data="ad:users"),
+        types.InlineKeyboardButton("👥 Users", callback_data="ad:users", color="progress"),
     )
     m.add(
         types.InlineKeyboardButton("📢 Broadcast", callback_data="ad:broadcast", color="progress"),
         types.InlineKeyboardButton("✨ Emoji Premium", callback_data="ad:emoji", color="active"),
     )
     m.add(
-        types.InlineKeyboardButton("⚙️ Settings", callback_data="ad:settings"),
-        types.InlineKeyboardButton("📊 Stats", callback_data="ad:stats"),
+        types.InlineKeyboardButton("⚙️ Settings", callback_data="ad:settings", color="progress"),
+        types.InlineKeyboardButton("📊 Stats", callback_data="ad:stats", color="active"),
     )
-    m.add(types.InlineKeyboardButton("🔄 Refresh", callback_data="ad:home"))
+    m.add(types.InlineKeyboardButton("🔄 Refresh", callback_data="ad:home", color="inactive"))
     return m
 
 
@@ -632,24 +633,26 @@ def kb_admin_products(store):
             types.InlineKeyboardButton(
                 f"{en} {c.get('icon') or '📦'} {c.get('name')}",
                 callback_data=f"ad:cat:{c['id']}",
+                color="active",
             )
         )
-    m.add(types.InlineKeyboardButton("➕ បង្កើត Category", callback_data="ad:newcat"))
-    m.add(types.InlineKeyboardButton("⬅️ Admin", callback_data="ad:home"))
+    m.add(types.InlineKeyboardButton("➕ បង្កើត Category", callback_data="ad:newcat", color="progress"))
+    m.add(types.InlineKeyboardButton("⬅️ Admin", callback_data="ad:home", color="inactive"))
     return m
 
 
 def kb_admin_cat(cat):
     m = types.InlineKeyboardMarkup()
     m.add(
-        types.InlineKeyboardButton("➕ បន្ថែម Pack", callback_data=f"ad:newpack:{cat['id']}"),
+        types.InlineKeyboardButton("➕ បន្ថែម Pack", callback_data=f"ad:newpack:{cat['id']}", color="progress"),
         types.InlineKeyboardButton(
             "⛔ បិទ" if cat.get("enabled", True) else "✅ បើក",
             callback_data=f"ad:togglecat:{cat['id']}",
+            color="danger" if cat.get("enabled", True) else "active",
         ),
     )
-    m.add(types.InlineKeyboardButton("✏️ ឈ្មោះ Category", callback_data=f"ad:renamecat:{cat['id']}"))
-    m.add(types.InlineKeyboardButton("🎨 Icon", callback_data=f"ad:iconcat:{cat['id']}"))
+    m.add(types.InlineKeyboardButton("✏️ ឈ្មោះ Category", callback_data=f"ad:renamecat:{cat['id']}", color="progress"))
+    m.add(types.InlineKeyboardButton("🎨 Icon", callback_data=f"ad:iconcat:{cat['id']}", color="progress"))
     for p in cat.get("packs") or []:
         st = pack_stock_count(p)
         en = "✅" if p.get("enabled", True) else "⛔"
@@ -657,32 +660,35 @@ def kb_admin_cat(cat):
             types.InlineKeyboardButton(
                 f"{en} {p.get('name')} ${p.get('price'):.2f} · {st}",
                 callback_data=f"ad:pack:{cat['id']}:{p['id']}",
+                color="active",
             )
         )
-    m.add(types.InlineKeyboardButton("🗑 លុប Category", callback_data=f"ad:delcat:{cat['id']}"))
-    m.add(types.InlineKeyboardButton("⬅️ Products", callback_data="ad:products"))
+    m.add(types.InlineKeyboardButton("🗑 លុប Category", callback_data=f"ad:delcatask:{cat['id']}", color="danger"))
+    m.add(types.InlineKeyboardButton("⬅️ Products", callback_data="ad:products", color="inactive"))
     return m
 
 
 def kb_admin_pack(cat_id, pack):
     m = types.InlineKeyboardMarkup()
-    m.add(types.InlineKeyboardButton("🔑 បន្ថែម Stock", callback_data=f"ad:addstock:{cat_id}:{pack['id']}"))
-    m.add(types.InlineKeyboardButton("💵 កែតម្លៃ", callback_data=f"ad:price:{cat_id}:{pack['id']}"))
-    m.add(types.InlineKeyboardButton("✏️ ឈ្មោះ Pack", callback_data=f"ad:renamepack:{cat_id}:{pack['id']}"))
+    m.add(types.InlineKeyboardButton("🔑 បន្ថែម Stock", callback_data=f"ad:addstock:{cat_id}:{pack['id']}", color="progress"))
+    m.add(types.InlineKeyboardButton("💵 កែតម្លៃ", callback_data=f"ad:price:{cat_id}:{pack['id']}", color="active"))
+    m.add(types.InlineKeyboardButton("✏️ ឈ្មោះ Pack", callback_data=f"ad:renamepack:{cat_id}:{pack['id']}", color="progress"))
     m.add(
         types.InlineKeyboardButton(
             "⛔ បិទ Pack" if pack.get("enabled", True) else "✅ បើក Pack",
             callback_data=f"ad:togglepack:{cat_id}:{pack['id']}",
+            color="danger" if pack.get("enabled", True) else "active",
         )
     )
     m.add(
         types.InlineKeyboardButton(
             f"Type: {pack.get('stock_type') or 'text'}",
             callback_data=f"ad:stocktype:{cat_id}:{pack['id']}",
+            color="progress",
         )
     )
-    m.add(types.InlineKeyboardButton("🗑 លុប Pack", callback_data=f"ad:delpack:{cat_id}:{pack['id']}"))
-    m.add(types.InlineKeyboardButton("⬅️ Category", callback_data=f"ad:cat:{cat_id}"))
+    m.add(types.InlineKeyboardButton("🗑 លុប Pack", callback_data=f"ad:delpackask:{cat_id}:{pack['id']}", color="danger"))
+    m.add(types.InlineKeyboardButton("⬅️ Category", callback_data=f"ad:cat:{cat_id}", color="inactive"))
     return m
 
 
@@ -702,8 +708,8 @@ def kb_emoji_menu(per_row=5):
     if row:
         m.row(*row)
     m.add(types.InlineKeyboardButton("📋 Set many (reply message)", callback_data="ad:emmulti"))
-    m.add(types.InlineKeyboardButton("👁 Preview", callback_data="ad:empreview"))
-    m.add(types.InlineKeyboardButton("⬅️ Admin", callback_data="ad:home"))
+    m.add(types.InlineKeyboardButton("👁 Preview", callback_data="ad:empreview", color="active"))
+    m.add(types.InlineKeyboardButton("⬅️ Admin", callback_data="ad:home", color="inactive"))
     return m
 
 
@@ -1148,7 +1154,7 @@ def handle_admin_cb(c: types.CallbackQuery):
                     f"${p.get('price'):.2f} · <b>{pack_stock_count(p)}</b>"
                 )
         m = types.InlineKeyboardMarkup()
-        m.add(types.InlineKeyboardButton("⬅️ Admin", callback_data="ad:home"))
+        m.add(types.InlineKeyboardButton("⬅️ Admin", callback_data="ad:home", color="inactive"))
         edit("\n".join(lines), m)
         return
 
@@ -1172,7 +1178,7 @@ def handle_admin_cb(c: types.CallbackQuery):
                         callback_data=f"ad:force:{o['id']}",
                     )
                 )
-        m.add(types.InlineKeyboardButton("⬅️ Admin", callback_data="ad:home"))
+        m.add(types.InlineKeyboardButton("⬅️ Admin", callback_data="ad:home", color="inactive"))
         edit("\n".join(lines), m)
         return
 
@@ -1205,8 +1211,8 @@ def handle_admin_cb(c: types.CallbackQuery):
                 f"  orders={u.get('orders') or 0} · last {esc(u.get('last'))}"
             )
         m = types.InlineKeyboardMarkup()
-        m.add(types.InlineKeyboardButton("📤 Export IDs", callback_data="ad:exportusers"))
-        m.add(types.InlineKeyboardButton("⬅️ Admin", callback_data="ad:home"))
+        m.add(types.InlineKeyboardButton("📤 Export IDs", callback_data="ad:exportusers", color="progress"))
+        m.add(types.InlineKeyboardButton("⬅️ Admin", callback_data="ad:home", color="inactive"))
         edit("\n".join(lines)[:3500], m)
         return
 
@@ -1221,7 +1227,7 @@ def handle_admin_cb(c: types.CallbackQuery):
         bot.answer_callback_query(c.id)
         _wait[uid] = {"action": "broadcast"}
         m = types.InlineKeyboardMarkup()
-        m.add(types.InlineKeyboardButton("❌ បោះបង់", callback_data="ad:home"))
+        m.add(types.InlineKeyboardButton("❌ បោះបង់", callback_data="ad:home", color="danger"))
         edit("📢 ផ្ញើសារ broadcast\n\nវាយសារ (HTML បាន) រួចផ្ញើមក:", m)
         return
 
@@ -1242,7 +1248,7 @@ def handle_admin_cb(c: types.CallbackQuery):
         bot.answer_callback_query(c.id)
         _wait[uid] = {"action": "set_emoji_multi"}
         m = types.InlineKeyboardMarkup()
-        m.add(types.InlineKeyboardButton("⬅️ Emoji", callback_data="ad:emoji"))
+        m.add(types.InlineKeyboardButton("⬅️ Emoji", callback_data="ad:emoji", color="inactive"))
         edit(
             "📋 <b>Set many</b>\n\n"
             "ផ្ញើសារមួយដែលមាន <b>emoji ធម្មតា + premium emoji</b>\n"
@@ -1310,7 +1316,7 @@ def handle_admin_cb(c: types.CallbackQuery):
             ch = key
         _wait[uid] = {"action": "set_emoji", "key": ch}
         m = types.InlineKeyboardMarkup()
-        m.add(types.InlineKeyboardButton("⬅️ Emoji", callback_data="ad:emoji"))
+        m.add(types.InlineKeyboardButton("⬅️ Emoji", callback_data="ad:emoji", color="inactive"))
         cur = EMOJI_MAP.get(ch) or "—"
         edit(
             f"✨ Set premium for {ch}\n"
@@ -1336,7 +1342,7 @@ def handle_admin_cb(c: types.CallbackQuery):
         m.add(types.InlineKeyboardButton("🖼 Upload Banner", callback_data="ad:setbanner", color="active"))
         m.add(types.InlineKeyboardButton("🎬 Welcome Video", callback_data="ad:setwelcomevid", color="active"))
         m.add(types.InlineKeyboardButton("🎥 Tutorial Video", callback_data="ad:settutorial", color="active"))
-        m.add(types.InlineKeyboardButton("✏️ Support text", callback_data="ad:setsupport"))
+        m.add(types.InlineKeyboardButton("✏️ Support text", callback_data="ad:setsupport", color="progress"))
         m.add(types.InlineKeyboardButton("⬅️ Admin", callback_data="ad:home", color="inactive"))
         pay_ok = "✅" if (KHMER_API_KEY or KHMER_PROFILE_KEY) else "❌"
         edit(
@@ -1439,11 +1445,22 @@ def handle_admin_cb(c: types.CallbackQuery):
             handle_admin_cb(c)
         return
 
+    if data.startswith("ad:delcatask:"):
+        cat_id = data.split(":", 2)[2]
+        cat = find_cat(store, cat_id)
+        bot.answer_callback_query(c.id)
+        name = (cat or {}).get("name") or cat_id
+        m = types.InlineKeyboardMarkup()
+        m.add(types.InlineKeyboardButton("✅ បញ្ជាក់លុប", callback_data=f"ad:delcat:{cat_id}", color="danger"))
+        m.add(types.InlineKeyboardButton("❌ បោះបង់", callback_data=f"ad:cat:{cat_id}", color="inactive"))
+        edit(f"⚠️ លុប Category <b>{esc(name)}</b> និង packs ទាំងអស់?", m)
+        return
+
     if data.startswith("ad:delcat:"):
         cat_id = data.split(":", 2)[2]
         store["categories"] = [x for x in (store.get("categories") or []) if x.get("id") != cat_id]
         save_store(store)
-        bot.answer_callback_query(c.id, "Deleted")
+        bot.answer_callback_query(c.id, "Deleted ✅")
         c.data = "ad:products"
         handle_admin_cb(c)
         return
@@ -1548,13 +1565,33 @@ def handle_admin_cb(c: types.CallbackQuery):
             handle_admin_cb(c)
         return
 
+    if data.startswith("ad:delpackask:"):
+        _, _, cat_id, pack_id = data.split(":", 3)
+        cat, pack = find_pack(store, cat_id, pack_id)
+        bot.answer_callback_query(c.id)
+        name = (pack or {}).get("name") or pack_id
+        m = types.InlineKeyboardMarkup()
+        m.add(types.InlineKeyboardButton("✅ បញ្ជាក់លុប", callback_data=f"ad:delpack:{cat_id}:{pack_id}", color="danger"))
+        m.add(types.InlineKeyboardButton("❌ បោះបង់", callback_data=f"ad:pack:{cat_id}:{pack_id}", color="inactive"))
+        edit(f"⚠️ លុប Pack <b>{esc(name)}</b> និង stock?", m)
+        return
+
     if data.startswith("ad:delpack:"):
         _, _, cat_id, pack_id = data.split(":", 3)
         cat = find_cat(store, cat_id)
         if cat:
             cat["packs"] = [p for p in (cat.get("packs") or []) if p.get("id") != pack_id]
+            # clear leftover stock keys if stored separately
+            stock = load_stock() if "load_stock" in globals() else None
+            try:
+                st = load_stock()
+                if isinstance(st, dict) and pack_id in st:
+                    st.pop(pack_id, None)
+                    save_stock(st)
+            except Exception:
+                pass
             save_store(store)
-            bot.answer_callback_query(c.id, "Deleted")
+            bot.answer_callback_query(c.id, "Deleted ✅")
             c.data = f"ad:cat:{cat_id}"
             handle_admin_cb(c)
         return
