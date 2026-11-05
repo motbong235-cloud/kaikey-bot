@@ -790,7 +790,30 @@ def touch_user(msg):
     save_users(u)
 
 
+def try_fulfill_nostock(cat_id, pack_id) -> int:
+    orders = load_orders()
+    count = 0
+    for oid, o in list(orders.items()):
+        if o.get("status") != "paid_nostock":
+            continue
+        if o.get("cat_id") != cat_id or o.get("pack_id") != pack_id:
+            continue
+        store_now = load_store()
+        _, pack_now = find_pack(store_now, cat_id, pack_id)
+        need = int(o.get("qty") or 1)
+        if pack_stock_count(pack_now or {}) < need:
+            break
+        o2 = deliver_order(o)
+        try:
+            send_delivery(int(o2.get("user_id")), o2)
+        except Exception:
+            pass
+        count += 1
+    return count
+
+
 def deliver_order(order):
+
     store = load_store()
     delivered = []
     for _ in range(int(order.get("qty") or 1)):
@@ -819,7 +842,7 @@ def send_delivery(chat_id, order):
     if not items:
         bot.send_message(
             chat_id,
-            f"✅ បង់ប្រាក់រួច <code>{esc(order['id'])}</code>\n⚠️ ស្តុកអស់ — Admin នឹងផ្ញើដោយដៃ។",
+            f"✅ បង់ប្រាក់រួច <code>{esc(order['id'])}</code>\n⚠️ ស្តុកអស់បណ្តោះអាសន្ន — Admin នឹងផ្ញើ Key/File auto ពេលមានស្តុក។",
         )
         notify_admins(
             f"⚠️ PAID no stock\n<code>{esc(order['id'])}</code>\nUser {order.get('user_id')}\n"
@@ -841,9 +864,16 @@ def send_delivery(chat_id, order):
                 bot.send_message(chat_id, f"🔑 #{i}: <code>{esc(item.get('file_id'))}</code>")
         else:
             bot.send_message(chat_id, f"🔑 <b>Key #{i}</b>\n<code>{esc(item)}</code>")
-    notify_admins(
-        f"✅ DELIVERED <code>{esc(order['id'])}</code>\nUser {order.get('user_id')} · ${order.get('total')}"
-    )
+    left = 0
+    try:
+        _, pk = find_pack(load_store(), order.get("cat_id"), order.get("pack_id"))
+        left = pack_stock_count(pk or {})
+    except Exception:
+        pass
+    note = f"✅ DELIVERED <code>{esc(order['id'])}</code>\nUser {order.get('user_id')} · ${order.get('total')}\n📦 {esc(order.get('pack_name'))} · នៅសល់ <b>{left}</b>"
+    if left == 0:
+        note += "\n⚠️ <b>អស់ស្តុកហើយ</b> — សូមបន្ថែម stock"
+    notify_admins(note)
 
 
 def notify_admins(text):
@@ -992,7 +1022,7 @@ def on_cb(c: types.CallbackQuery):
         return
 
     if data == "noop":
-        bot.answer_callback_query(c.id, "Out of stock", show_alert=True)
+        bot.answer_callback_query(c.id, "❌ អស់ស្តុកហើយ — សូមរង់ចាំ admin បន្ថែម", show_alert=True)
         return
 
     if data in ("buy", "cats"):
@@ -1029,7 +1059,7 @@ def on_cb(c: types.CallbackQuery):
         store = load_store()
         cat, pack = find_pack(store, cat_id, pack_id)
         if not pack or pack_stock_count(pack) <= 0:
-            bot.answer_callback_query(c.id, "Out of stock", show_alert=True)
+            bot.answer_callback_query(c.id, "❌ អស់ស្តុកហើយ — សូមរង់ចាំ admin បន្ថែម", show_alert=True)
             return
         order = new_order(uid, cat, pack, qty=1)
         bot.answer_callback_query(c.id)
@@ -1859,32 +1889,58 @@ def on_wizard(msg):
 
     if action == "add_stock":
         cat_id, pack_id = st.get("cat_id"), st.get("pack_id")
-        # keep wait until done once
-        _wait.pop(uid, None)
+        if msg.text and msg.text.strip().lower() in ("/done", "done", "រួច"):
+            _wait.pop(uid, None)
+            cat, pack = find_pack(store, cat_id, pack_id)
+            n = pack_stock_count(pack) if pack else 0
+            bot.reply_to(msg, f"✅ បិទផ្ទុក stock · នៅសល់ <b>{n}</b>")
+            if pack:
+                bot.send_message(
+                    msg.chat.id,
+                    f"📦 <b>{esc(pack.get('name'))}</b>\nstock: <b>{n}</b>",
+                    reply_markup=kb_admin_pack(cat_id, pack),
+                )
+            return
         _, pack = find_pack(store, cat_id, pack_id)
         if not pack:
+            _wait.pop(uid, None)
             bot.reply_to(msg, "Pack gone")
             return
+        before = pack_stock_count(pack)
         stock = list(pack.get("stock") or [])
         added = 0
         if msg.document:
-            stock.append(
-                {
-                    "file_id": msg.document.file_id,
-                    "type": "document",
-                    "name": msg.document.file_name,
-                }
-            )
+            stock.append({"file_id": msg.document.file_id, "type": "document", "name": msg.document.file_name})
+            pack["stock_type"] = "file"
+            added = 1
+        elif getattr(msg, "photo", None):
+            stock.append({"file_id": msg.photo[-1].file_id, "type": "photo"})
             pack["stock_type"] = "file"
             added = 1
         elif msg.text:
             lines = [ln.strip() for ln in msg.text.splitlines() if ln.strip()]
+            if lines and lines[0].startswith("/"):
+                bot.reply_to(msg, "ផ្ញើ key ឬ /done")
+                return
             stock.extend(lines)
             pack["stock_type"] = "text"
             added = len(lines)
+        else:
+            bot.reply_to(msg, "ផ្ញើ text keys / file / /done")
+            return
         pack["stock"] = stock
         save_store(store)
-        bot.reply_to(msg, f"✅ Added {added} · total stock <b>{len(stock)}</b>")
+        after = len(stock)
+        bot.reply_to(
+            msg,
+            f"✅ <b>បន្ថែម stock +{added}</b>\n📦 {esc(pack.get('name'))}\nមុន: <b>{before}</b> → ឥឡូវ: <b>{after}</b>\nផ្ញើបន្ត ឬ <code>/done</code>",
+        )
+        try:
+            fulfilled = try_fulfill_nostock(cat_id, pack_id)
+            if fulfilled:
+                bot.send_message(msg.chat.id, f"🚚 Auto-deliver order ខ្វះ stock: <b>{fulfilled}</b>")
+        except Exception as e:
+            bot.send_message(msg.chat.id, f"fulfill note: {esc(e)}")
         return
 
 
