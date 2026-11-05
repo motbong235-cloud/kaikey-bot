@@ -548,7 +548,6 @@ def kb_main():
     load_emoji()
     m = types.ReplyKeyboardMarkup(resize_keyboard=True)
     m.row(types.KeyboardButton("🛒 BUY NOW", color="active"))
-    m.row(types.KeyboardButton("🎬 បង្រៀនប្រើ", color="progress"))
     return m
 
 
@@ -916,16 +915,17 @@ def cmd_start(msg):
                 bot.send_document(msg.chat.id, banner)
             except Exception:
                 pass
+    # Reply keyboard only (ដូច ROMA) — គ្មាន inline BUY NOW
+    kb = kb_main()
     sent = False
     if welcome_vid:
         try:
-            bot.send_video(msg.chat.id, welcome_vid, caption=wtext, reply_markup=kb_buy_inline())
+            bot.send_video(msg.chat.id, welcome_vid, caption=wtext, reply_markup=kb)
             sent = True
         except Exception:
             sent = False
     if not sent:
-        bot.send_message(msg.chat.id, wtext, reply_markup=kb_buy_inline())
-    api_send_message(msg.chat.id, "ជ្រើសមុខងារ៖", reply_markup=kb_main(), parse_mode="HTML")
+        bot.send_message(msg.chat.id, wtext, reply_markup=kb)
 
 
 @bot.message_handler(commands=["admin", "panel"])
@@ -965,6 +965,11 @@ def msg_tutorial(msg):
             pass
     bot.send_message(msg.chat.id, cap + "\n\n⚠️ Admin មិនទាន់ upload video បង្រៀន — /admin → Settings")
 
+
+
+@bot.message_handler(commands=["tutorial", "help"])
+def cmd_tutorial(msg):
+    msg_tutorial(msg)
 
 @bot.callback_query_handler(func=lambda c: True)
 def on_cb(c: types.CallbackQuery):
